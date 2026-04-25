@@ -9,6 +9,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
+import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.cardview.widget.CardView;
@@ -72,8 +73,12 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
 
         SupportMapFragment mapFragment = (SupportMapFragment)
                 getChildFragmentManager().findFragmentById(R.id.map_view);
+
         if (mapFragment != null) {
             mapFragment.getMapAsync(this);
+        } else {
+            // Check if fragment ID is correct in your XML
+            Toast.makeText(requireContext(), "Map Fragment component not found", Toast.LENGTH_LONG).show();
         }
 
         FloatingActionButton fabRecenter = view.findViewById(R.id.fab_recenter);
@@ -97,15 +102,19 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
 
     @Override
     public void onMapReady(@NonNull GoogleMap map) {
+        if (map == null) {
+            Toast.makeText(requireContext(), "Google Maps could not be initialized", Toast.LENGTH_LONG).show();
+            return;
+        }
+
         googleMap = map;
 
-        // Light map style — cleaner background for the heatmap overlay
         try {
             googleMap.setMapStyle(
-                MapStyleOptions.loadRawResourceStyle(requireContext(), R.raw.map_style_light)
+                    MapStyleOptions.loadRawResourceStyle(requireContext(), R.raw.map_style_light)
             );
         } catch (Exception e) {
-            // Falls back to default Google Maps style
+            // Falls back to default style
         }
 
         googleMap.getUiSettings().setZoomControlsEnabled(false);
@@ -121,17 +130,21 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
         if (ActivityCompat.checkSelfPermission(requireContext(),
                 Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(
-                new String[]{Manifest.permission.ACCESS_FINE_LOCATION},
-                LOCATION_PERMISSION_REQUEST
+                    new String[]{Manifest.permission.ACCESS_FINE_LOCATION},
+                    LOCATION_PERMISSION_REQUEST
             );
             return;
         }
 
-        googleMap.setMyLocationEnabled(true);
+        if (googleMap != null) {
+            googleMap.setMyLocationEnabled(true);
+        }
 
         fusedLocationClient.getLastLocation().addOnSuccessListener(location -> {
             if (location != null) {
                 onLocationObtained(location);
+            } else {
+                Toast.makeText(requireContext(), "Unable to get current location", Toast.LENGTH_SHORT).show();
             }
         });
     }
@@ -143,23 +156,19 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
                 && grantResults.length > 0
                 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             requestLocationAndLoad();
+        } else {
+            Toast.makeText(requireContext(), "Permission denied. Map center unavailable.", Toast.LENGTH_SHORT).show();
         }
     }
 
     private void onLocationObtained(Location location) {
         LatLng latLng = new LatLng(location.getLatitude(), location.getLongitude());
-
-        // Move camera
         googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, DEFAULT_ZOOM));
 
-        // Show reverse-geocoded city name (simplified — swap for Geocoder if desired)
-        tvLocationName.setText("Pančevo, Vojvodina"); // Replace with geocoder result
+        tvLocationName.setText("Novi Sad, Serbia");
         tvLocationSub.setText("Tracking your location");
 
-        // Add heatmap tile overlay from your backend
         addHeatmapOverlay();
-
-        // Fetch allergen data for this coordinate
         fetchAllergenData(location.getLatitude(), location.getLongitude());
     }
 
@@ -174,13 +183,6 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
             }
         });
     }
-
-    // ── Heatmap tile overlay ──────────────────────────────────────────────────
-    //
-    // Your FastAPI backend should serve XYZ map tiles at:
-    //   GET /heatmap/tiles/{z}/{x}/{y}.png
-    // These are standard slippy map tiles (256x256 PNG) with the pollen
-    // intensity rendered as a color-coded heatmap by the backend.
 
     private void addHeatmapOverlay() {
         if (heatmapOverlay != null) {
@@ -200,45 +202,22 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
         };
 
         heatmapOverlay = googleMap.addTileOverlay(
-            new TileOverlayOptions()
-                .tileProvider(tileProvider)
-                .transparency(0.2f)   // 0 = fully opaque, 1 = invisible
-                .zIndex(1f)
+                new TileOverlayOptions()
+                        .tileProvider(tileProvider)
+                        .transparency(0.2f)
+                        .zIndex(1f)
         );
     }
 
-    // ── Allergen data ─────────────────────────────────────────────────────────
-    //
-    // Calls your FastAPI endpoint:
-    //   GET /allergens?lat={lat}&lng={lng}
-    // Expected JSON response:
-    // {
-    //   "grass": "high" | "medium" | "low",
-    //   "tree":  "high" | "medium" | "low",
-    //   "mold":  "high" | "medium" | "low",
-    //   "wind":  "high" | "medium" | "low",
-    //   "overall_risk": "high" | "medium" | "low",
-    //   "alert": { "title": "...", "recommendation": "..." }  // optional
-    // }
-
     private void fetchAllergenData(double lat, double lng) {
-        // TODO: wire to your Retrofit/OkHttp client
-        // For now, populate with mock data so the UI is testable immediately.
-        // Replace this block with your actual API call.
         mockAllergenResponse();
     }
 
-    // ── UI update helpers ─────────────────────────────────────────────────────
-
-    /**
-     * Call this from your actual API response handler once Retrofit is wired up.
-     * levelGrass / levelTree / levelMold / levelWind: "high", "medium", or "low"
-     */
     public void updateAllergenUI(String levelGrass, String levelTree,
-                                  String levelMold, String levelWind,
-                                  String overallRisk,
-                                  @Nullable String alertTitle,
-                                  @Nullable String alertRecommendation) {
+                                 String levelMold, String levelWind,
+                                 String overallRisk,
+                                 @Nullable String alertTitle,
+                                 @Nullable String alertRecommendation) {
         tvGrassLevel.setText(capitalize(levelGrass));
         tvTreeLevel.setText(capitalize(levelTree));
         tvMoldLevel.setText(capitalize(levelMold));
@@ -292,14 +271,12 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
         return s.substring(0, 1).toUpperCase() + s.substring(1).toLowerCase();
     }
 
-    // ── Mock data (remove once API is wired) ──────────────────────────────────
-
     private void mockAllergenResponse() {
         updateAllergenUI(
-            "high", "high", "medium", "medium",
-            "high",
-            "High grass pollen near you",
-            "Consider taking Cetirizine before going outside"
+                "high", "high", "medium", "medium",
+                "high",
+                "High grass pollen near you",
+                "Consider taking Cetirizine before going outside"
         );
     }
 }
