@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import pollen, symptoms, profile
+from routers import pollen, symptoms, profile, yamnet
 
 app = FastAPI(title="AlergoGuard API", version="1.0.0")
 
@@ -14,6 +14,7 @@ app.add_middleware(
 app.include_router(pollen.router, prefix="/pollen", tags=["pollen"])
 app.include_router(symptoms.router, prefix="/symptoms", tags=["symptoms"])
 app.include_router(profile.router, prefix="/profile", tags=["profile"])
+app.include_router(yamnet.router, prefix="/yamnet", tags=["yamnet"])
 
 
 @app.get("/health")

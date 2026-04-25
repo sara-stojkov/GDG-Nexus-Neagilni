@@ -3,8 +3,6 @@ from typing import List, Optional
 from datetime import datetime
 
 
-# --- Pollen / Route ---
-
 class PollenRiskRequest(BaseModel):
     lat: float
     lng: float
@@ -12,9 +10,9 @@ class PollenRiskRequest(BaseModel):
 
 
 class PollenRiskResponse(BaseModel):
-    risk_level: str        # "low" | "medium" | "high"
+    risk_level: str
     dominant_allergen: str
-    score: int             # 0-100
+    score: int
     advice: str
 
 
@@ -23,41 +21,64 @@ class RouteWaypoint(BaseModel):
     lng: float
 
 
-class RouteRiskRequest(BaseModel):
+class LocationUpdateRequest(BaseModel):
     user_id: str
-    waypoints: List[RouteWaypoint]
+    lat: float
+    lng: float
+    heading: float = 0.0
+    speed: Optional[float] = None
 
 
-class RouteSegment(BaseModel):
-    from_point: List[float]
-    to_point: List[float]
-    risk: str              # "low" | "medium" | "high"
+class HardwareSignals(BaseModel):
+    close_windows: bool
+    activate_cabin_filter: bool
+    reduce_speed: bool
+    alert_driver: bool
 
 
-class RouteRiskResponse(BaseModel):
-    segments: List[RouteSegment]
+class LocationUpdateResponse(BaseModel):
+    risk_score: int
+    risk_level: str
+    dominant_allergen: str
+    advice: str
+    risk_explanation: str
+    hardware_signals: HardwareSignals
+    lookahead_risk: str
 
-
-# --- Symptoms ---
 
 class SymptomLogRequest(BaseModel):
     user_id: str
-    type: str              # "sneeze" | "cough"
+    type: str
     count: int
     lat: float
     lng: float
+    pollen_score: Optional[int] = None
+    dominant_allergen: Optional[str] = None
+    medication_taken_last_2h: Optional[bool] = False
+    mucosa_score: Optional[int] = None
     timestamp: Optional[datetime] = None
 
 
 class SymptomLogResponse(BaseModel):
     allergy_id_updated: bool
     new_threshold: int
+    sensitivity_updated: bool
 
 
-# --- Profile ---
+class MedicationLogRequest(BaseModel):
+    user_id: str
+    name: str
+    dose_mg: Optional[int] = None
+
+
+class MucosaScoreRequest(BaseModel):
+    user_id: str
+    image_data: Optional[str] = None
+
 
 class AllergyProfileResponse(BaseModel):
     user_id: str
     allergens: List[str]
     threshold: int
     peak_hours: List[str]
+    symptom_sensitivity: dict

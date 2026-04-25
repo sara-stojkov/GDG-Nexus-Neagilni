@@ -1,4 +1,5 @@
 import httpx
+import math
 import os
 from dotenv import load_dotenv
 
@@ -14,6 +15,34 @@ ALLERGEN_MAP = {
     "OAK": "oak",
     "PINE": "pine",
 }
+
+
+def get_lookahead_points(lat: float, lng: float, heading: float, count: int = 4) -> list[tuple]:
+    """
+    Generates points in the direction of movement at distances 500m, 1km, 1.5km, 2km.
+    """
+    points = [(lat, lng)]  # current location always first
+    distances = [500, 1000, 1500, 2000]  # meters
+
+    heading_rad = math.radians(heading)
+    R = 6371000  # radius in meters
+
+    for d in distances[:count]:
+        lat_rad = math.radians(lat)
+        lng_rad = math.radians(lng)
+
+        new_lat_rad = math.asin(
+            math.sin(lat_rad) * math.cos(d / R) +
+            math.cos(lat_rad) * math.sin(d / R) * math.cos(heading_rad)
+        )
+        new_lng_rad = lng_rad + math.atan2(
+            math.sin(heading_rad) * math.sin(d / R) * math.cos(lat_rad),
+            math.cos(d / R) - math.sin(lat_rad) * math.sin(new_lat_rad)
+        )
+
+        points.append((math.degrees(new_lat_rad), math.degrees(new_lng_rad)))
+
+    return points
 
 
 def score_to_risk(score: int) -> str:

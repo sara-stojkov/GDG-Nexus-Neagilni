@@ -219,3 +219,6 @@ __marimo__/
 
 # PyCharm
 .idea
+
+# Firebase
+firebase_credentials.json
