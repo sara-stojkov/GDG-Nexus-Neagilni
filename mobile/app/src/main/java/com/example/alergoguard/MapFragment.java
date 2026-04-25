@@ -3,6 +3,8 @@ package com.example.alergoguard;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.location.Address;
+import android.location.Geocoder;
 import android.location.Location;
 import android.os.Bundle;
 import android.view.LayoutInflater;
@@ -30,20 +32,20 @@ import com.google.android.gms.maps.model.UrlTileProvider;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.util.List;
+import java.util.Locale;
 
 public class MapFragment extends Fragment implements OnMapReadyCallback {
 
     private static final int LOCATION_PERMISSION_REQUEST = 1001;
     private static final float DEFAULT_ZOOM = 13f;
 
-    // Backend base URL — replace with your FastAPI server
     private static final String API_BASE = "https://your-api.example.com";
 
     private GoogleMap googleMap;
     private FusedLocationProviderClient fusedLocationClient;
     private TileOverlay heatmapOverlay;
 
-    // Views
     private TextView tvLocationName;
     private TextView tvLocationSub;
     private TextView tvRiskBadge;
@@ -77,7 +79,6 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
         if (mapFragment != null) {
             mapFragment.getMapAsync(this);
         } else {
-            // Check if fragment ID is correct in your XML
             Toast.makeText(requireContext(), "Map Fragment component not found", Toast.LENGTH_LONG).show();
         }
 
@@ -165,11 +166,58 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
         LatLng latLng = new LatLng(location.getLatitude(), location.getLongitude());
         googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, DEFAULT_ZOOM));
 
-        tvLocationName.setText("Novi Sad, Serbia");
+        // Show a placeholder while geocoding runs on a background thread
+        tvLocationName.setText("Locating…");
         tvLocationSub.setText("Tracking your location");
+
+        resolveLocationName(location.getLatitude(), location.getLongitude());
 
         addHeatmapOverlay();
         fetchAllergenData(location.getLatitude(), location.getLongitude());
+    }
+
+    /**
+     * Reverse-geocodes the coordinates on a background thread so we never
+     * block the main thread. Updates the UI back on the main thread once done.
+     */
+    private void resolveLocationName(double lat, double lng) {
+        new Thread(() -> {
+            String city    = null;
+            String country = null;
+
+            try {
+                if (Geocoder.isPresent()) {
+                    Geocoder geocoder = new Geocoder(requireContext(), Locale.getDefault());
+                    List<Address> addresses = geocoder.getFromLocation(lat, lng, 1);
+
+                    if (addresses != null && !addresses.isEmpty()) {
+                        Address address = addresses.get(0);
+
+                        // Prefer locality (city), fall back to subAdminArea, then adminArea
+                        city = address.getLocality();
+                        if (city == null) city = address.getSubAdminArea();
+                        if (city == null) city = address.getAdminArea();
+
+                        country = address.getCountryName();
+                    }
+                }
+            } catch (Exception e) {
+                // Network error or Geocoder unavailable — silently fall back
+            }
+
+            final String finalCity    = (city    != null) ? city    : "Unknown location";
+            final String finalCountry = (country != null) ? country : "";
+
+            // Back to the main thread to update views
+            if (isAdded()) {
+                requireActivity().runOnUiThread(() -> {
+                    tvLocationName.setText(finalCity);
+                    tvLocationSub.setText(finalCountry.isEmpty()
+                            ? "Tracking your location"
+                            : finalCountry);
+                });
+            }
+        }).start();
     }
 
     private void recenterOnUser() {
