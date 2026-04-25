@@ -18,7 +18,6 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-
 SERVICE_ACCOUNT_FILE = os.getenv("GEMINI_CREDENTIALS", "gemini_credentials.json")
 
 creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE)
@@ -31,34 +30,54 @@ vertexai.init(
 
 model = GenerativeModel("gemini-2.5-flash")
 
-async def build_user_context(user_id: str, current_pollen: dict) -> dict:
+
+async def build_user_context(
+    user_id: str,
+    current_pollen: dict,
+    profile: dict = None,
+    recent_events: list = None
+) -> dict:
     """
     Gathers all available user data for the Gemini context.
-    Firebase calls that are synchronous run in parallel in a thread pool
-    so as not to block the event loop.
+    Accepts pre-fetched profile and recent_events to avoid duplicate Firebase reads.
+    Remaining calls run in parallel in a thread pool.
     """
-    (
-        profile,
-        recent_symptoms,
-        correlation,
-        recent_medications,
-        hotspots,
-        mucosa,
-    ) = await asyncio.gather(
-        asyncio.to_thread(get_or_create_profile, user_id),
-        asyncio.to_thread(get_recent_symptom_events, user_id, 48),
-        asyncio.to_thread(get_symptom_pollen_correlation, user_id),
-        asyncio.to_thread(get_recent_medications, user_id, 12),
-        asyncio.to_thread(get_historical_hotspots, user_id),
-        get_mucosa_context(user_id),  # već je async
-    )
+    if profile is None or recent_events is None:
+        # Fallback: fetch from Firebase if not provided
+        profile_task = asyncio.to_thread(get_or_create_profile, user_id)
+        events_task = asyncio.to_thread(get_recent_symptom_events, user_id, 48)
+        (
+            profile,
+            recent_events,
+            correlation,
+            recent_medications,
+            hotspots,
+            mucosa,
+        ) = await asyncio.gather(
+            profile_task,
+            events_task,
+            asyncio.to_thread(get_symptom_pollen_correlation, user_id),
+            asyncio.to_thread(get_recent_medications, user_id, 12),
+            asyncio.to_thread(get_historical_hotspots, user_id),
+            get_mucosa_context(user_id),
+        )
+    else:
+        # Profile and events already fetched — only run remaining calls
+        (
+            correlation,
+            recent_medications,
+            hotspots,
+            mucosa,
+        ) = await asyncio.gather(
+            asyncio.to_thread(get_symptom_pollen_correlation, user_id),
+            asyncio.to_thread(get_recent_medications, user_id, 12),
+            asyncio.to_thread(get_historical_hotspots, user_id),
+            get_mucosa_context(user_id),
+        )
 
-    total_sneezes = sum(
-        e.get("count", 0) for e in recent_symptoms if e.get("type") == "sneeze"
-    )
-    total_coughs = sum(
-        e.get("count", 0) for e in recent_symptoms if e.get("type") == "cough"
-    )
+    # Fix: each event is one symptom occurrence, not a count aggregate
+    total_sneezes = sum(1 for e in recent_events if e.get("type") == "sneeze")
+    total_coughs = sum(1 for e in recent_events if e.get("type") == "cough")
 
     dominant = current_pollen.get("dominant_allergen", "grass")
     sensitivity = profile.get("symptom_sensitivity", {}).get(dominant, 1.0)
@@ -84,7 +103,7 @@ async def build_user_context(user_id: str, current_pollen: dict) -> dict:
         "recent_symptoms": {
             "sneezes_48h": total_sneezes,
             "coughs_48h": total_coughs,
-            "total_events": len(recent_symptoms)
+            "total_events": len(recent_events)
         },
         "correlation": correlation,
         "mucosa": mucosa,
@@ -172,11 +191,13 @@ async def get_driving_advice(
     risk_level: str,
     dominant_allergen: str,
     hour: int,
-    user_id: str = None
+    user_id: str = None,
+    profile: dict = None,
+    recent_events: list = None
 ) -> dict:
     """
     If user_id is available — use the full context.
-    If not — fallback to a simple prompt.
+    Accepts pre-fetched profile and recent_events to avoid duplicate Firebase reads.
     """
     current_pollen = {
         "score": score,
@@ -186,7 +207,12 @@ async def get_driving_advice(
 
     try:
         if user_id:
-            ctx = await build_user_context(user_id, current_pollen)
+            ctx = await build_user_context(
+                user_id,
+                current_pollen,
+                profile=profile,
+                recent_events=recent_events
+            )
             prompt = build_prompt(ctx, hour)
         else:
             prompt = _simple_prompt(allergens, score, threshold, risk_level, dominant_allergen, hour)
