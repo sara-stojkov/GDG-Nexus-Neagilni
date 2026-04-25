@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    item_tag_chip.xml
+    One allergy chip row: coloured pill label + ✕ remove button.
+    Used inside ProfileFragment's container_allergies LinearLayout.
+-->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:layout_marginBottom="6dp">
+
+    <!-- Pill label -->
+    <TextView
+        android:id="@+id/tv_chip_label"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:background="@drawable/bg_chip"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="7dp"
+        android:text="Grass pollen"
+        android:textSize="12sp"
+        android:textColor="@color/text_primary"
+        android:layout_marginEnd="8dp" />
+
+    <!-- Remove button -->
+    <ImageButton
+        android:id="@+id/btn_chip_remove"
+        android:layout_width="28dp"
+        android:layout_height="28dp"
+        android:src="@drawable/ic_close"
+        android:background="@drawable/bg_chip"
+        android:padding="6dp"
+        android:contentDescription="Remove"
+        app:tint="@color/text_secondary" />
+
+</LinearLayout>
