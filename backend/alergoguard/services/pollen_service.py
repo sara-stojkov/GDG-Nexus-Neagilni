@@ -66,7 +66,6 @@ async def get_pollen_data(lat: float, lng: float) -> dict:
         response = await client.get(POLLEN_API_URL, params=params)
 
     if response.status_code != 200:
-        # Fallback mock if API doesn't work in that area
         return _mock_pollen_response()
 
     data = response.json()
@@ -75,17 +74,14 @@ async def get_pollen_data(lat: float, lng: float) -> dict:
         daily = data["dailyInfo"][0]
         plant_info = daily.get("plantInfo", [])
 
-        # find dominant allergen by indexValue
-        dominant = max(plant_info, key=lambda x: x.get("indexInfo", {}).get("value", 0))
-        score = dominant.get("indexInfo", {}).get("value", 0) * 20  # 0-5 → 0-100
-        name = dominant.get("plant", {}).get("name", "GRASS")
-        allergen = ALLERGEN_MAP.get(name.upper(), name.lower())
+        species = {}
+        for plant in plant_info:
+            name = plant.get("plant", {}).get("name", "").upper()
+            allergen = ALLERGEN_MAP.get(name)
+            if allergen:
+                species[allergen] = plant.get("indexInfo", {}).get("value", 0)
 
-        return {
-            "score": min(score, 100),
-            "dominant_allergen": allergen,
-            "risk_level": score_to_risk(score),
-        }
+        return {"species": species}
 
     except (KeyError, IndexError, ValueError):
         return _mock_pollen_response()
@@ -93,7 +89,13 @@ async def get_pollen_data(lat: float, lng: float) -> dict:
 
 def _mock_pollen_response() -> dict:
     return {
-        "score": 75,
-        "dominant_allergen": "birch",
-        "risk_level": "high",
+        "species": {
+            "birch": 3,
+            "grass": 1,
+            "weed": 0,
+            "oak": 2,
+            "pine": 1,
+        }
     }
+
+

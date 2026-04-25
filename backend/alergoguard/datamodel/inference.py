@@ -1,7 +1,7 @@
 import torch
 
-from model.allergy_model import AllergyModel
-from tensors.pollen_tensor import PollenTensorizer
+from datamodel.alergy_model import AllergyModel
+from datamodel.tensors.pollen_tensor import PollenTensorizer
 from transforms.log_transform import LogTransform
 
 class AllergyInference:
