@@ -220,5 +220,6 @@ __marimo__/
 # PyCharm
 .idea
 
-# Firebase
+# Firebase and Gemini
 firebase_credentials.json
+gemini_credentials.json

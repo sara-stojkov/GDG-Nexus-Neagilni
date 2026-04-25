@@ -1,4 +1,3 @@
-import asyncio
 import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime, timezone, timedelta
@@ -29,13 +28,11 @@ USERS = [
             "pine": 0.7
         },
         "profile": {
-            # A driver who commutes from Belgrade to Novi Sad every day
-            # # Severe allergy sufferer, takes medicine regularly but is late with the dose
             "route_lats": [44.80, 44.85, 44.95, 45.10, 45.25],
             "route_lngs": [20.46, 20.50, 20.55, 20.60, 20.65],
             "typical_sneezes_high": (3, 6),
             "typical_sneezes_medium": (1, 3),
-            "med_compliance": 0.6,   # takes medication 60% of the day
+            "med_compliance": 0.6,
             "drives_per_day": 2
         }
     },
@@ -53,8 +50,6 @@ USERS = [
             "pine": 0.4
         },
         "profile": {
-            # A driver who takes children to school in the morning and in the afternoon
-            # Moderate allergy sufferer, takes medicine regularly
             "route_lats": [44.78, 44.80, 44.82, 44.84],
             "route_lngs": [20.40, 20.42, 20.44, 20.46],
             "typical_sneezes_high": (2, 4),
@@ -77,8 +72,6 @@ USERS = [
             "pine": 1.7
         },
         "profile": {
-            # Severe allergy sufferer, drives through wooded areas
-            # Often has critical attacks, low threshold
             "route_lats": [44.75, 44.78, 44.82, 44.87, 44.92],
             "route_lngs": [20.35, 20.38, 20.41, 20.44, 20.47],
             "typical_sneezes_high": (5, 9),
@@ -101,8 +94,6 @@ USERS = [
             "pine": 0.3
         },
         "profile": {
-            # Mild allergy sufferer, drives only in the afternoon
-            # High threshold, rarely has serious attacks
             "route_lats": [44.82, 44.84, 44.86],
             "route_lngs": [20.42, 20.44, 20.46],
             "typical_sneezes_high": (1, 3),
@@ -125,8 +116,6 @@ USERS = [
             "pine": 1.5
         },
         "profile": {
-            # Extreme allergy sufferer, to multiple medications
-            # Very low threshold, frequent critical alarms
             "route_lats": [44.77, 44.80, 44.83, 44.86, 44.89, 44.92],
             "route_lngs": [20.38, 20.41, 20.44, 20.47, 20.50, 20.53],
             "typical_sneezes_high": (7, 12),
@@ -138,20 +127,17 @@ USERS = [
 ]
 
 ALLERGENS = ["birch", "grass", "weed", "oak", "pine"]
-MEDICATIONS_POOL = ["Zyrtec", "Claritin", "Aerius", "Telfast", "Flonase", "Montelukast"]
 
 
 # ─── HELPERS ─────────────────────────────────────────────────────
 
 def random_pollen_score(hour: int, risk_profile: str = "medium") -> tuple:
-    """Generates a realistic pollen score depending on the time of day."""
     base_scores = {
         "low": (10, 35),
         "medium": (35, 65),
         "high": (65, 95)
     }
 
-    # Morning and evening peaks are realistic for pollen
     if 6 <= hour <= 10:
         multiplier = 1.3
     elif 17 <= hour <= 20:
@@ -173,10 +159,19 @@ def random_pollen_score(hour: int, risk_profile: str = "medium") -> tuple:
     return score, risk
 
 
-def ts(days_ago: int, hour: int, minute: int = 0) -> str:
+def make_dt(days_ago: int, hour: int, minute: int = 0) -> datetime:
     dt = datetime.now(timezone.utc) - timedelta(days=days_ago)
-    dt = dt.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    return dt.isoformat()
+    return dt.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+
+def clear_user(uid: str):
+    subcollections = ["medications", "symptom_events", "mucosa_scores", "location_history"]
+    for sub in subcollections:
+        docs = db.collection("users").document(uid).collection(sub).stream()
+        for doc in docs:
+            doc.reference.delete()
+    db.collection("users").document(uid).delete()
+    print(f"  ✗ {uid} deleted")
 
 
 def seed_user(user: dict):
@@ -184,40 +179,39 @@ def seed_user(user: dict):
     p = user["profile"]
     print(f"\n→ Seeding {uid}...")
 
-    # Profile document
+    clear_user(uid)
+
     db.collection("users").document(uid).set({
         "user_id": uid,
         "allergens": user["allergens"],
         "threshold": user["threshold"],
         "peak_hours": user["peak_hours"],
         "symptom_sensitivity": user["symptom_sensitivity"],
-        "created_at": ts(30, 10)
+        "created_at": make_dt(30, 10)  # datetime, ne string
     })
 
-    # ── 14 days of history ──────────────────────────────────────────
+    # ── 14 days history ────────────────────────────────────────────
     for day in range(14, 0, -1):
 
-        # Season — more intense in the first week
         season_intensity = "high" if day <= 7 else "medium"
 
-        # ── Medicine ────────────────────────────────────────────────
+        # ── Medicine ─────────────────────────────────────────────────────
         if random.random() < p["med_compliance"]:
             med_name = random.choice(user["medications"])
             db.collection("users").document(uid).collection("medications").add({
                 "name": med_name,
                 "dose_mg": random.choice([5, 10, 20]),
-                "logged_at": ts(day, random.randint(6, 9))
+                "logged_at": make_dt(day, random.randint(6, 9))  # datetime
             })
 
-            # Some also take an evening dose.
             if random.random() < 0.3:
                 db.collection("users").document(uid).collection("medications").add({
                     "name": med_name,
                     "dose_mg": random.choice([5, 10]),
-                    "logged_at": ts(day, random.randint(20, 22))
+                    "logged_at": make_dt(day, random.randint(20, 22))  # datetime
                 })
 
-        # ── rides ────────────────────────────────────────────────
+        # ── Rides ──────────────────────────────────────────────────
         drive_hours = random.sample(
             [7, 8, 9, 17, 18],
             min(p["drives_per_day"], 5)
@@ -227,7 +221,6 @@ def seed_user(user: dict):
             pollen_score, risk_level = random_pollen_score(hour, season_intensity)
             dominant = random.choice(user["allergens"])
 
-            # Location along the route
             idx = random.randint(0, len(p["route_lats"]) - 1)
             lat = p["route_lats"][idx] + random.uniform(-0.01, 0.01)
             lng = p["route_lngs"][idx] + random.uniform(-0.01, 0.01)
@@ -243,10 +236,10 @@ def seed_user(user: dict):
                 "dominant_allergen": dominant,
                 "risk_level": risk_level,
                 "triggered_alarm": triggered_alarm,
-                "timestamp": ts(day, hour, random.randint(0, 59))
+                "timestamp": make_dt(day, hour, random.randint(0, 59))  # datetime
             })
 
-            # ── Symptoms while driving ─────────────────────────────
+            # ── Symptoms ──────────────────────────────
             if risk_level == "high":
                 sneeze_count = random.randint(*p["typical_sneezes_high"])
             elif risk_level == "medium":
@@ -268,10 +261,9 @@ def seed_user(user: dict):
                     "mucosa_score": random.randint(30, 85),
                     "yamnet_confidence": round(random.uniform(0.55, 0.98), 2),
                     "source": "yamnet",
-                    "timestamp": ts(day, hour, random.randint(5, 55))
+                    "timestamp": make_dt(day, hour, random.randint(5, 55))  # datetime
                 })
 
-            # Coughing — less common than sneezing
             if random.random() < 0.3 and risk_level != "low":
                 db.collection("users").document(uid).collection("symptom_events").add({
                     "type": "cough",
@@ -284,17 +276,17 @@ def seed_user(user: dict):
                     "mucosa_score": random.randint(40, 90),
                     "yamnet_confidence": round(random.uniform(0.5, 0.92), 2),
                     "source": "yamnet",
-                    "timestamp": ts(day, hour, random.randint(5, 55))
+                    "timestamp": make_dt(day, hour, random.randint(5, 55))  # datetime
                 })
 
-        # ── Mucosa scores (1-2 times a day) ──────────────────────
+        # ── Mucosa scores ─────────────────────────────────────────
         for _ in range(random.randint(1, 2)):
             score_base = 50 if season_intensity == "high" else 35
             db.collection("users").document(uid).collection("mucosa_scores").add({
                 "score": random.randint(score_base - 15, score_base + 25),
                 "source": "mock",
                 "metadata": {"model_version": "mock_v1", "image_provided": False},
-                "timestamp": ts(day, random.randint(8, 22))
+                "timestamp": make_dt(day, random.randint(8, 22))  # datetime
             })
 
     print(f"✓ {uid} done")

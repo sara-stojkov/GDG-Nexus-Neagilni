@@ -1,6 +1,9 @@
-from google import genai
-from google.genai import types
+import vertexai
+from vertexai.generative_models import GenerativeModel
+from google.oauth2 import service_account
+import asyncio
 import os
+import logging
 from dotenv import load_dotenv
 from services.firebase_service import (
     get_recent_symptom_events,
@@ -13,21 +16,43 @@ from services.mucosa_service import get_mucosa_context
 
 load_dotenv()
 
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+logger = logging.getLogger(__name__)
 
+
+SERVICE_ACCOUNT_FILE = os.getenv("GEMINI_CREDENTIALS", "gemini_credentials.json")
+
+creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE)
+
+vertexai.init(
+    project="hackathongdgnexus",
+    location="europe-west1",
+    credentials=creds,
+)
+
+model = GenerativeModel("gemini-2.5-flash")
 
 async def build_user_context(user_id: str, current_pollen: dict) -> dict:
     """
     Gathers all available user data for the Gemini context.
+    Firebase calls that are synchronous run in parallel in a thread pool
+    so as not to block the event loop.
     """
-    profile = get_or_create_profile(user_id)
-    recent_symptoms = get_recent_symptom_events(user_id, hours=48)
-    correlation = get_symptom_pollen_correlation(user_id)
-    recent_medications = get_recent_medications(user_id, hours=12)
-    mucosa = await get_mucosa_context(user_id)
-    hotspots = get_historical_hotspots(user_id)
+    (
+        profile,
+        recent_symptoms,
+        correlation,
+        recent_medications,
+        hotspots,
+        mucosa,
+    ) = await asyncio.gather(
+        asyncio.to_thread(get_or_create_profile, user_id),
+        asyncio.to_thread(get_recent_symptom_events, user_id, 48),
+        asyncio.to_thread(get_symptom_pollen_correlation, user_id),
+        asyncio.to_thread(get_recent_medications, user_id, 12),
+        asyncio.to_thread(get_historical_hotspots, user_id),
+        get_mucosa_context(user_id),  # već je async
+    )
 
-    # Frequency of symptoms in the last 48 hours
     total_sneezes = sum(
         e.get("count", 0) for e in recent_symptoms if e.get("type") == "sneeze"
     )
@@ -35,20 +60,21 @@ async def build_user_context(user_id: str, current_pollen: dict) -> dict:
         e.get("count", 0) for e in recent_symptoms if e.get("type") == "cough"
     )
 
-    # Sensitivity coefficient for the current dominant allergen
     dominant = current_pollen.get("dominant_allergen", "grass")
     sensitivity = profile.get("symptom_sensitivity", {}).get(dominant, 1.0)
-
-    # Effective score — corrected for personal sensitivity
     effective_score = min(100, round(current_pollen.get("score", 0) * sensitivity))
 
-    # The last medicine
     last_medication = recent_medications[0] if recent_medications else None
     medication_taken_last_2h = False
     if last_medication:
         from datetime import datetime, timezone, timedelta
-        logged = datetime.fromisoformat(last_medication.get("logged_at", ""))
-        medication_taken_last_2h = (datetime.now(timezone.utc) - logged) < timedelta(hours=2)
+        logged_at = last_medication.get("logged_at")
+        if isinstance(logged_at, str):
+            logged_at = datetime.fromisoformat(logged_at)
+        if logged_at:
+            if logged_at.tzinfo is None:
+                logged_at = logged_at.replace(tzinfo=timezone.utc)
+            medication_taken_last_2h = (datetime.now(timezone.utc) - logged_at) < timedelta(hours=2)
 
     return {
         "profile": profile,
@@ -79,19 +105,16 @@ def build_prompt(ctx: dict, hour: int) -> str:
     med = ctx["medication"]
     corr = ctx["correlation"]
 
-    # Correlation
     corr_text = "insufficient data"
     if corr.get("correlation") == "available":
-        corr_text = f"symptoms typically occur at score-u {corr['avg_trigger_score']}"
+        corr_text = f"symptoms typically occur at score {corr['avg_trigger_score']}"
 
-    # Lek
     med_text = "not taken"
     if med["taken_last_2h"]:
         med_text = f"taken less than 2h ({med['last']['name']})"
     elif med["last"]:
         med_text = f"last medicine: {med['last']['name']}, more than 2 hours ago"
 
-    # Mucosa
     mucosa_text = "no data"
     if mucosa["latest_score"] is not None:
         mucosa_text = (
@@ -121,7 +144,7 @@ SYMPTOMS (last 48 hours):
 - Number events: {symptoms['total_events']}
 - Historical correlation: {corr_text}
 
-CONDITION OF MUCOSUM:
+CONDITION OF MUCOSA:
 - {mucosa_text}
 
 THERAPY:
@@ -133,8 +156,8 @@ HISTORICAL HOTSPOTS:
 
 ASSIGNMENT:
 Give two outputs:
-1. ADVICE (max 15 words, specific for the driver)
-2. RISK_EXPLANATION (max 25 words, why this risk was determined)
+1. TIP (max 15 words, specific for the driver)
+2. RISK (max 25 words, why this risk was determined)
 
 Answer format — exclusively like this, without additional text:
 TIP: <text>
@@ -168,14 +191,14 @@ async def get_driving_advice(
         else:
             prompt = _simple_prompt(allergens, score, threshold, risk_level, dominant_allergen, hour)
 
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt
+        response = await asyncio.to_thread(
+            model.generate_content,
+            prompt
         )
         return _parse_response(response.text.strip(), risk_level)
 
     except Exception as e:
-        print(f"Gemini error: {e}")
+        logger.error("Gemini error: %s", e)
         return _fallback_response(risk_level)
 
 
@@ -185,12 +208,13 @@ def _parse_response(text: str, risk_level: str) -> dict:
     explanation = None
 
     for line in lines:
-        if line.startswith("ADVICE:"):
-            advice = line.replace("ADVICE:", "").strip()
+        if line.startswith("TIP:"):
+            advice = line.replace("TIP:", "").strip()
         elif line.startswith("RISK:"):
             explanation = line.replace("RISK:", "").strip()
 
     if not advice:
+        logger.warning("Gemini response is not parsed correctly, I use fallback. Text: %s", text[:200])
         return _fallback_response(risk_level)
 
     return {
@@ -206,7 +230,7 @@ Current pollen score: {score}/100, threshold: {threshold}/100
 Dominant allergen: {dominant_allergen}, risk: {risk_level}, hour: {hour}h
 
 Give two outputs:
-ADVICE: <max 15 words, specific for the driver>
+TIP: <max 15 words, specific for the driver>
 RISK: <max 25 words, explanation>
 """
 

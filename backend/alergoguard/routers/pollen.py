@@ -11,6 +11,10 @@ from services.firebase_service import (
     log_location_event,
     update_sensitivity
 )
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -26,22 +30,16 @@ def build_hardware_signals(risk_level: str) -> HardwareSignals:
 
 @router.post("/location-update", response_model=LocationUpdateResponse)
 async def location_update(request: LocationUpdateRequest):
-    profile = get_or_create_profile(request.user_id)
-
-    # Current location + lookahead points
     points = get_lookahead_points(request.lat, request.lng, request.heading)
 
-    # Pollen for each point
-    results = []
-    for lat, lng in points:
-        data = await get_pollen_data(lat, lng)
-        results.append(data)
+    profile, *pollen_results = await asyncio.gather(
+        asyncio.to_thread(get_or_create_profile, request.user_id),
+        *[get_pollen_data(lat, lng) for lat, lng in points]
+    )
 
-    # Worst score
-    worst = max(results, key=lambda x: x["score"])
-    lookahead_worst = max(results[1:], key=lambda x: x["score"]) if len(results) > 1 else worst
+    worst = max(pollen_results, key=lambda x: x["score"])
+    lookahead_worst = max(pollen_results[1:], key=lambda x: x["score"]) if len(pollen_results) > 1 else worst
 
-    # Gemini with full context
     gemini_response = await get_driving_advice(
         allergens=profile["allergens"],
         score=worst["score"],
@@ -54,8 +52,7 @@ async def location_update(request: LocationUpdateRequest):
 
     triggered_alarm = worst["risk_level"] == "high"
 
-    # Log location to Firebase
-    log_location_event(request.user_id, {
+    tasks = [asyncio.to_thread(log_location_event, request.user_id, {
         "lat": request.lat,
         "lng": request.lng,
         "heading": request.heading,
@@ -64,11 +61,14 @@ async def location_update(request: LocationUpdateRequest):
         "dominant_allergen": worst["dominant_allergen"],
         "risk_level": worst["risk_level"],
         "triggered_alarm": triggered_alarm
-    })
+    })]
 
-    # If it is an alarm — increase the sensitivity for the dominant allergen
     if triggered_alarm:
-        update_sensitivity(request.user_id, worst["dominant_allergen"], delta=0.05)
+        tasks.append(asyncio.to_thread(
+            update_sensitivity, request.user_id, worst["dominant_allergen"], 0.05
+        ))
+
+    await asyncio.gather(*tasks)
 
     return LocationUpdateResponse(
         risk_score=worst["score"],
@@ -83,8 +83,10 @@ async def location_update(request: LocationUpdateRequest):
 
 @router.get("/risk", response_model=PollenRiskResponse)
 async def get_pollen_risk(lat: float, lng: float, user_id: str):
-    profile = get_or_create_profile(user_id)
-    pollen = await get_pollen_data(lat, lng)
+    profile, pollen = await asyncio.gather(
+        asyncio.to_thread(get_or_create_profile, user_id),
+        get_pollen_data(lat, lng)
+    )
 
     gemini_response = await get_driving_advice(
         allergens=profile["allergens"],
