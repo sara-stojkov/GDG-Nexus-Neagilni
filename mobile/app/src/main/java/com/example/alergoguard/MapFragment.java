@@ -1,12 +1,14 @@
 package com.example.alergoguard;
 
 import android.Manifest;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.graphics.Color;
 import android.location.Address;
 import android.location.Geocoder;
 import android.location.Location;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -27,7 +29,6 @@ import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.MapStyleOptions;
 import com.google.android.gms.maps.model.TileOverlay;
 import com.google.android.gms.maps.model.TileOverlayOptions;
-import com.google.android.gms.maps.model.TileProvider;
 import com.google.android.gms.maps.model.UrlTileProvider;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import java.net.MalformedURLException;
@@ -37,15 +38,31 @@ import java.util.Locale;
 
 public class MapFragment extends Fragment implements OnMapReadyCallback {
 
-    private static final int LOCATION_PERMISSION_REQUEST = 1001;
-    private static final float DEFAULT_ZOOM = 13f;
+    private static final int    LOCATION_PERMISSION_REQUEST = 1001;
+    private static final float  DEFAULT_ZOOM                = 13f;
+    private static final long   REFRESH_INTERVAL_MS         = 60_000L; // 1 minute
+
+    // Google Pollen API tile types — toggle via chip/button if you add one later
+    private static final String POLLEN_GRASS = "GRASS_UPI";
+    private static final String POLLEN_TREE  = "TREE_UPI";
+    private static final String POLLEN_WEED  = "WEED_UPI";
 
     private static final String API_BASE = "https://your-api.example.com";
 
     private GoogleMap googleMap;
     private FusedLocationProviderClient fusedLocationClient;
-    private TileOverlay heatmapOverlay;
 
+    // We keep one overlay per pollen type so all three can stack
+    private TileOverlay grassOverlay;
+    private TileOverlay treeOverlay;
+    private TileOverlay weedOverlay;
+
+    // Periodic refresh
+    private final Handler refreshHandler = new Handler(Looper.getMainLooper());
+    private Runnable refreshRunnable;
+    private String googleApiKey = null; // read once from manifest metadata
+
+    // Views
     private TextView tvLocationName;
     private TextView tvLocationSub;
     private TextView tvRiskBadge;
@@ -70,6 +87,7 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
         super.onViewCreated(view, savedInstanceState);
 
         bindViews(view);
+        readApiKey();
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(requireActivity());
 
@@ -85,6 +103,40 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
         FloatingActionButton fabRecenter = view.findViewById(R.id.fab_recenter);
         fabRecenter.setOnClickListener(v -> recenterOnUser());
     }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        startPollenRefreshLoop();
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        stopPollenRefreshLoop(); // don't refresh while off-screen
+    }
+
+    // ── API key ───────────────────────────────────────────────────────────────
+
+    /**
+     * Reads the Google Maps / Pollen API key from AndroidManifest metadata.
+     * This is the same key already declared as ${googleMapsKey}.
+     */
+    private void readApiKey() {
+        try {
+            ApplicationInfo ai = requireContext().getPackageManager()
+                    .getApplicationInfo(
+                            requireContext().getPackageName(),
+                            PackageManager.GET_META_DATA);
+            if (ai.metaData != null) {
+                googleApiKey = ai.metaData.getString("com.google.android.geo.API_KEY");
+            }
+        } catch (PackageManager.NameNotFoundException e) {
+            // Should never happen — package is always found
+        }
+    }
+
+    // ── Views ─────────────────────────────────────────────────────────────────
 
     private void bindViews(View view) {
         tvLocationName = view.findViewById(R.id.tv_location_name);
@@ -103,20 +155,12 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
 
     @Override
     public void onMapReady(@NonNull GoogleMap map) {
-        if (map == null) {
-            Toast.makeText(requireContext(), "Google Maps could not be initialized", Toast.LENGTH_LONG).show();
-            return;
-        }
-
         googleMap = map;
 
         try {
             googleMap.setMapStyle(
-                    MapStyleOptions.loadRawResourceStyle(requireContext(), R.raw.map_style_light)
-            );
-        } catch (Exception e) {
-            // Falls back to default style
-        }
+                    MapStyleOptions.loadRawResourceStyle(requireContext(), R.raw.map_style_light));
+        } catch (Exception ignored) { }
 
         googleMap.getUiSettings().setZoomControlsEnabled(false);
         googleMap.getUiSettings().setMyLocationButtonEnabled(false);
@@ -132,20 +176,18 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
                 Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(
                     new String[]{Manifest.permission.ACCESS_FINE_LOCATION},
-                    LOCATION_PERMISSION_REQUEST
-            );
+                    LOCATION_PERMISSION_REQUEST);
             return;
         }
 
-        if (googleMap != null) {
-            googleMap.setMyLocationEnabled(true);
-        }
+        if (googleMap != null) googleMap.setMyLocationEnabled(true);
 
         fusedLocationClient.getLastLocation().addOnSuccessListener(location -> {
             if (location != null) {
                 onLocationObtained(location);
             } else {
-                Toast.makeText(requireContext(), "Unable to get current location", Toast.LENGTH_SHORT).show();
+                Toast.makeText(requireContext(),
+                        "Unable to get current location", Toast.LENGTH_SHORT).show();
             }
         });
     }
@@ -158,7 +200,8 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
                 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             requestLocationAndLoad();
         } else {
-            Toast.makeText(requireContext(), "Permission denied. Map center unavailable.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(requireContext(),
+                    "Permission denied. Map center unavailable.", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -166,55 +209,38 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
         LatLng latLng = new LatLng(location.getLatitude(), location.getLongitude());
         googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, DEFAULT_ZOOM));
 
-        // Show a placeholder while geocoding runs on a background thread
         tvLocationName.setText("Locating…");
         tvLocationSub.setText("Tracking your location");
 
         resolveLocationName(location.getLatitude(), location.getLongitude());
-
-        addHeatmapOverlay();
+        addPollenOverlays(); // first draw immediately
         fetchAllergenData(location.getLatitude(), location.getLongitude());
     }
 
-    /**
-     * Reverse-geocodes the coordinates on a background thread so we never
-     * block the main thread. Updates the UI back on the main thread once done.
-     */
     private void resolveLocationName(double lat, double lng) {
         new Thread(() -> {
-            String city    = null;
-            String country = null;
-
+            String city = null, country = null;
             try {
                 if (Geocoder.isPresent()) {
                     Geocoder geocoder = new Geocoder(requireContext(), Locale.getDefault());
                     List<Address> addresses = geocoder.getFromLocation(lat, lng, 1);
-
                     if (addresses != null && !addresses.isEmpty()) {
-                        Address address = addresses.get(0);
-
-                        // Prefer locality (city), fall back to subAdminArea, then adminArea
-                        city = address.getLocality();
-                        if (city == null) city = address.getSubAdminArea();
-                        if (city == null) city = address.getAdminArea();
-
-                        country = address.getCountryName();
+                        Address a = addresses.get(0);
+                        city    = a.getLocality();
+                        if (city == null) city = a.getSubAdminArea();
+                        if (city == null) city = a.getAdminArea();
+                        country = a.getCountryName();
                     }
                 }
-            } catch (Exception e) {
-                // Network error or Geocoder unavailable — silently fall back
-            }
+            } catch (Exception ignored) { }
 
-            final String finalCity    = (city    != null) ? city    : "Unknown location";
-            final String finalCountry = (country != null) ? country : "";
+            final String fc = (city    != null) ? city    : "Unknown location";
+            final String fn = (country != null) ? country : "";
 
-            // Back to the main thread to update views
             if (isAdded()) {
                 requireActivity().runOnUiThread(() -> {
-                    tvLocationName.setText(finalCity);
-                    tvLocationSub.setText(finalCountry.isEmpty()
-                            ? "Tracking your location"
-                            : finalCountry);
+                    tvLocationName.setText(fc);
+                    tvLocationSub.setText(fn.isEmpty() ? "Tracking your location" : fn);
                 });
             }
         }).start();
@@ -226,21 +252,31 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
 
         fusedLocationClient.getLastLocation().addOnSuccessListener(location -> {
             if (location != null && googleMap != null) {
-                LatLng latLng = new LatLng(location.getLatitude(), location.getLongitude());
-                googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, DEFAULT_ZOOM));
+                googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(
+                        new LatLng(location.getLatitude(), location.getLongitude()), DEFAULT_ZOOM));
             }
         });
     }
 
-    private void addHeatmapOverlay() {
-        if (heatmapOverlay != null) {
-            heatmapOverlay.remove();
-        }
+    // ── Pollen heatmap overlays ───────────────────────────────────────────────
 
-        TileProvider tileProvider = new UrlTileProvider(256, 256) {
+    /**
+     * Builds one UrlTileProvider that points at Google's Pollen API tile endpoint.
+     * The API key is the same one used for Google Maps — no extra setup needed
+     * as long as the "Pollen API" is enabled in your Google Cloud project.
+     *
+     * Tile URL format:
+     *   https://pollen.googleapis.com/v1/mapTypes/{TYPE}/heatmapTiles/{zoom}/{x}/{y}?key={KEY}
+     */
+    private UrlTileProvider buildPollenTileProvider(String pollenType) {
+        return new UrlTileProvider(256, 256) {
             @Override
             public URL getTileUrl(int x, int y, int zoom) {
-                String url = API_BASE + "/heatmap/tiles/" + zoom + "/" + x + "/" + y + ".png";
+                if (googleApiKey == null || googleApiKey.isEmpty()) return null;
+                String url = "https://pollen.googleapis.com/v1/mapTypes/"
+                        + pollenType
+                        + "/heatmapTiles/" + zoom + "/" + x + "/" + y
+                        + "?key=" + googleApiKey;
                 try {
                     return new URL(url);
                 } catch (MalformedURLException e) {
@@ -248,16 +284,81 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
                 }
             }
         };
-
-        heatmapOverlay = googleMap.addTileOverlay(
-                new TileOverlayOptions()
-                        .tileProvider(tileProvider)
-                        .transparency(0.2f)
-                        .zIndex(1f)
-        );
     }
 
+    /**
+     * Removes existing overlays and re-adds fresh ones.
+     * Called immediately on location obtained, then every REFRESH_INTERVAL_MS.
+     * Clearing and re-adding forces the tile cache to reload new data.
+     */
+    private void addPollenOverlays() {
+        if (googleMap == null || googleApiKey == null) return;
+
+        removePollenOverlays();
+
+        // Grass — most visible, slightly more opaque
+        grassOverlay = googleMap.addTileOverlay(new TileOverlayOptions()
+                .tileProvider(buildPollenTileProvider(POLLEN_GRASS))
+                .transparency(0.25f)
+                .zIndex(2f));
+
+        // Tree — middle layer
+        treeOverlay = googleMap.addTileOverlay(new TileOverlayOptions()
+                .tileProvider(buildPollenTileProvider(POLLEN_TREE))
+                .transparency(0.35f)
+                .zIndex(1f));
+
+        // Weed — bottom layer, most transparent
+        weedOverlay = googleMap.addTileOverlay(new TileOverlayOptions()
+                .tileProvider(buildPollenTileProvider(POLLEN_WEED))
+                .transparency(0.45f)
+                .zIndex(0f));
+    }
+
+    private void removePollenOverlays() {
+        if (grassOverlay != null) { grassOverlay.remove(); grassOverlay = null; }
+        if (treeOverlay  != null) { treeOverlay.remove();  treeOverlay  = null; }
+        if (weedOverlay  != null) { weedOverlay.remove();  weedOverlay  = null; }
+    }
+
+    // ── Periodic refresh ──────────────────────────────────────────────────────
+
+    private void startPollenRefreshLoop() {
+        refreshRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (isAdded() && googleMap != null) {
+                    addPollenOverlays();                          // refresh tiles
+                    refreshUserLocation();                        // refresh location pin
+                }
+                refreshHandler.postDelayed(this, REFRESH_INTERVAL_MS);
+            }
+        };
+        // First tick after 1 minute (initial load happens in onLocationObtained)
+        refreshHandler.postDelayed(refreshRunnable, REFRESH_INTERVAL_MS);
+    }
+
+    private void stopPollenRefreshLoop() {
+        if (refreshRunnable != null) {
+            refreshHandler.removeCallbacks(refreshRunnable);
+        }
+    }
+
+    private void refreshUserLocation() {
+        if (ActivityCompat.checkSelfPermission(requireContext(),
+                Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return;
+
+        fusedLocationClient.getLastLocation().addOnSuccessListener(location -> {
+            if (location != null && isAdded()) {
+                fetchAllergenData(location.getLatitude(), location.getLongitude());
+            }
+        });
+    }
+
+    // ── Allergen data (your FastAPI backend) ──────────────────────────────────
+
     private void fetchAllergenData(double lat, double lng) {
+        // TODO: replace mock with real API call to API_BASE
         mockAllergenResponse();
     }
 
@@ -298,7 +399,6 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
                 tvRiskBadge.setBackgroundResource(R.drawable.bg_badge_medium);
                 tvRiskBadge.setTextColor(requireContext().getColor(R.color.risk_medium));
                 break;
-            case "low":
             default:
                 tvRiskBadge.setBackgroundResource(R.drawable.bg_badge_low);
                 tvRiskBadge.setTextColor(requireContext().getColor(R.color.risk_low));

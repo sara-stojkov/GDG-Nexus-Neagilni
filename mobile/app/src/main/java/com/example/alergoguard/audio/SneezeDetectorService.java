@@ -18,25 +18,33 @@ public class SneezeDetectorService extends Service {
     private static final int    ID_MONITOR = 10;
     private static final int    ID_ALERT   = 11;
 
-    // ── Separate thresholds ───────────────────────────────────────────────────
-    // Sneeze gets a much lower bar because YAMNet is stingy with it
-    private static final float SNEEZE_THRESHOLD      = 0.005f; // very sensitive
-    private static final float COUGH_THRESHOLD       = 0.05f; // original, works fine
-    private static final int   FRAMES_TO_CONFIRM     = 1;
+    // Detection thresholds
+    private static final float SNEEZE_THRESHOLD  = 0.005f;
+    private static final float COUGH_THRESHOLD   = 0.05f;
+    private static final int   FRAMES_TO_CONFIRM = 1;
+
+    // After firing an alert, ignore the same type for this many milliseconds.
+    // A sneeze lasts ~1s; 8s cooldown means one real sneeze = one notification.
+    private static final long SNEEZE_COOLDOWN_MS = 8_000L;
+    private static final long COUGH_COOLDOWN_MS  = 8_000L;
 
     public static final String ACTION_SNEEZE = "com.example.alergoguard.SNEEZE";
     public static final String ACTION_SCORE  = "com.example.alergoguard.SCORE";
     public static final String EXTRA_SCORE   = "score";
-    public static final String EXTRA_LABEL   = "label"; // "Sneeze" or "Cough"
+    public static final String EXTRA_LABEL   = "label";
 
     private AudioRecord audioRecord;
     private AudioClassifier classifier;
     private Thread detectionThread;
     private volatile boolean running = false;
 
-    // Track consecutive frames separately per type
+    // Consecutive-frame counters
     private int consecutiveSneezeFrames = 0;
     private int consecutiveCoughFrames  = 0;
+
+    // Cooldown timestamps — 0 means "never fired yet, always allowed"
+    private long lastSneezeFiredAt = 0L;
+    private long lastCoughFiredAt  = 0L;
 
     @Override
     public void onCreate() {
@@ -114,42 +122,56 @@ public class SneezeDetectorService extends Service {
 
                     float[] scores = classifier.classify(floats);
 
-                    // ── Split scores ──────────────────────────────────────────
                     float sneezeOnly = scores[AudioClassifier.SNEEZE_INDEX];
                     float coughOnly  = scores[AudioClassifier.COUGH_INDEX]
                             + scores[AudioClassifier.THROAT_CLEAR_INDEX];
-                    float combined   = sneezeOnly + coughOnly; // for HomeFragment display
+                    float combined   = sneezeOnly + coughOnly;
 
                     Log.d(TAG, String.format(
-                            "sneeze=%.3f (thr=%.2f)  cough=%.3f (thr=%.2f)",
+                            "sneeze=%.3f (thr=%.3f)  cough=%.3f (thr=%.2f)",
                             sneezeOnly, SNEEZE_THRESHOLD,
                             coughOnly,  COUGH_THRESHOLD));
 
-                    // Broadcast combined score to HomeFragment live readout
+                    // Broadcast live score to HomeFragment
                     Intent scoreIntent = new Intent(ACTION_SCORE);
                     scoreIntent.putExtra(EXTRA_SCORE, combined);
                     LocalBroadcastManager.getInstance(this).sendBroadcast(scoreIntent);
 
-                    // ── Sneeze check (low threshold) ──────────────────────────
+                    long now = System.currentTimeMillis();
+
+                    // ── Sneeze check ──────────────────────────────────────────
                     if (sneezeOnly >= SNEEZE_THRESHOLD) {
                         consecutiveSneezeFrames++;
                         Log.d(TAG, "Sneeze candidate " + consecutiveSneezeFrames
                                 + "/" + FRAMES_TO_CONFIRM + "  score=" + sneezeOnly);
                         if (consecutiveSneezeFrames >= FRAMES_TO_CONFIRM) {
-                            triggerAlert(sneezeOnly, "Sneeze");
+                            // Only fire if we're past the cooldown window
+                            if (now - lastSneezeFiredAt >= SNEEZE_COOLDOWN_MS) {
+                                lastSneezeFiredAt = now;
+                                triggerAlert(sneezeOnly, "Sneeze");
+                            } else {
+                                Log.d(TAG, "Sneeze suppressed — still in cooldown ("
+                                        + (SNEEZE_COOLDOWN_MS - (now - lastSneezeFiredAt)) + "ms left)");
+                            }
                             consecutiveSneezeFrames = 0;
                         }
                     } else {
                         consecutiveSneezeFrames = 0;
                     }
 
-                    // ── Cough check (original threshold) ─────────────────────
+                    // ── Cough check ───────────────────────────────────────────
                     if (coughOnly >= COUGH_THRESHOLD) {
                         consecutiveCoughFrames++;
                         Log.d(TAG, "Cough candidate " + consecutiveCoughFrames
                                 + "/" + FRAMES_TO_CONFIRM + "  score=" + coughOnly);
                         if (consecutiveCoughFrames >= FRAMES_TO_CONFIRM) {
-                            triggerAlert(coughOnly, "Cough");
+                            if (now - lastCoughFiredAt >= COUGH_COOLDOWN_MS) {
+                                lastCoughFiredAt = now;
+                                triggerAlert(coughOnly, "Cough");
+                            } else {
+                                Log.d(TAG, "Cough suppressed — still in cooldown ("
+                                        + (COUGH_COOLDOWN_MS - (now - lastCoughFiredAt)) + "ms left)");
+                            }
                             consecutiveCoughFrames = 0;
                         }
                     } else {
@@ -172,18 +194,19 @@ public class SneezeDetectorService extends Service {
 
         String emoji = label.equals("Sneeze") ? "🤧" : "😮";
 
+        // No confidence % in the notification text
         Notification n = new NotificationCompat.Builder(this, CH_ALERT)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle(emoji + " " + label + " detected!")
-                .setContentText(String.format("Confidence: %.0f%%", score * 100))
+                .setContentText("High pollen area — consider your medication")
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
                 .build();
         getSystemService(NotificationManager.class).notify(ID_ALERT, n);
 
-        Intent i = new Intent(ACTION_SNEEZE); // keep same action so MainActivity receives it
+        Intent i = new Intent(ACTION_SNEEZE);
         i.putExtra(EXTRA_SCORE, score);
-        i.putExtra(EXTRA_LABEL, label);       // "Sneeze" or "Cough"
+        i.putExtra(EXTRA_LABEL, label);
         LocalBroadcastManager.getInstance(this).sendBroadcast(i);
     }
 
