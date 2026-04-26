@@ -24,6 +24,7 @@ import androidx.navigation.fragment.NavHostFragment;
 import androidx.navigation.ui.NavigationUI;
 
 import com.example.alergoguard.audio.SneezeDetectorService;
+import com.example.alergoguard.services.RiskAlertManager;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.snackbar.Snackbar;
 
@@ -35,6 +36,7 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
     private NavController navController;
+    private RiskAlertManager riskAlertManager;
 
     // ── Permission launcher ───────────────────────────────────────────────────
     private final ActivityResultLauncher<String[]> permissionLauncher =
@@ -86,7 +88,21 @@ public class MainActivity extends AppCompatActivity {
         NavigationUI.setupWithNavController(bottomNav, navController);
         // --------------------------------------------------
 
+        riskAlertManager = new RiskAlertManager(getApplicationContext());
+
         requestRequiredPermissions(); // auto-start sneeze detector
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (riskAlertManager != null) {
+            riskAlertManager.release();
+        }
+        super.onDestroy();
+    }
+
+    public RiskAlertManager getRiskAlertManager() {
+        return riskAlertManager;
     }
 
     @Override

@@ -118,8 +118,6 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
         readApiKey();
         setupToggleListeners();
 
-        // Bottom sheet — hideable=false is already set in XML.
-        // No setState needed; default is STATE_COLLAPSED which shows the peek.
         NestedScrollView bottomSheet = view.findViewById(R.id.bottom_sheet);
         BottomSheetBehavior.from(bottomSheet).setHideable(false);
 
@@ -187,8 +185,6 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
     private void loadLocationAndMap() {
         if (googleMap != null) googleMap.setMyLocationEnabled(true);
 
-        // getCurrentLocation() forces a fresh fix — getLastLocation() returns null
-        // on fresh installs / after reboot when there is no cached position yet.
         CurrentLocationRequest request = new CurrentLocationRequest.Builder()
                 .setPriority(Priority.PRIORITY_BALANCED_POWER_ACCURACY)
                 .build();
@@ -218,7 +214,17 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
         LatLng latLng = new LatLng(location.getLatitude(), location.getLongitude());
         googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, DEFAULT_ZOOM));
         resolveLocationName(location.getLatitude(), location.getLongitude());
+
+        // ✅ Detach listeners, check all boxes, re-attach, then draw once
+        cbGrass.setOnCheckedChangeListener(null);
+        cbTree.setOnCheckedChangeListener(null);
+        cbWeed.setOnCheckedChangeListener(null);
+        cbGrass.setChecked(true);
+        cbTree.setChecked(true);
+        cbWeed.setChecked(true);
+        setupToggleListeners();
         addPollenOverlays();
+
         fetchAllergenData(location.getLatitude(), location.getLongitude());
     }
 
@@ -326,6 +332,7 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
             tvAlertTitle.setText(title);
             tvAlertSub.setText(rec);
         }
+        // ✅ No handleRiskEffects here — TTS/pulse is HomeFragment's job only
     }
 
     private void updateRiskBadge(String risk) {

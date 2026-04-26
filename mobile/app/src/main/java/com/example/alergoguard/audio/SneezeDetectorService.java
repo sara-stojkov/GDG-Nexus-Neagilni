@@ -50,7 +50,7 @@ public class SneezeDetectorService extends Service {
     private static final String USER_ID = "marko_petrovic";
     private double currentLat    = 0.0;
     private double currentLng    = 0.0;
-    public void setLocation(double lat, double lng)    { this.currentLat = lat; this.currentLng = lng; }
+    public void setLocation(double lat, double lng) { this.currentLat = lat; this.currentLng = lng; }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -187,17 +187,40 @@ public class SneezeDetectorService extends Service {
 
         ApiClient.getService().sendYamNetEvent(
                 new YamNetEventRequest("marko_petrovic", label.toLowerCase(), score, 44.8176, 20.4569)
-                ).enqueue(new Callback<YamNetEventResponse>() {
-                    @Override
-                    public void onResponse(Call<YamNetEventResponse> call, Response<YamNetEventResponse> response) {
-                        Log.i(TAG, "Backend response: " + (response.body() != null ? response.body().alarmLevel : "null"));
-                    }
+        ).enqueue(new Callback<YamNetEventResponse>() {
+            @Override
+            public void onResponse(Call<YamNetEventResponse> call, Response<YamNetEventResponse> response) {
+                if (response.body() == null) {
+                    Log.w(TAG, "Backend response body is null");
+                    return;
+                }
 
-                    @Override
-                    public void onFailure(Call<YamNetEventResponse> call, Throwable t) {
-                        Log.e(TAG, "Backend call failed: " + t.getMessage());
-                    }
-                });
+                String alarmLevel = response.body().alarmLevel;
+                Log.i(TAG, "Backend response: " + alarmLevel);
+
+                if (alarmLevel == null || alarmLevel.equals("none")) return;
+
+                // ✅ Build advice text based on alarm level
+                String advice;
+                if ("critical".equals(alarmLevel) || "high".equals(alarmLevel)) {
+                    advice = "Danger! Critical pollen levels detected. Take your medication immediately and move indoors.";
+                } else {
+                    advice = "Pollen warning. Elevated levels detected in your area. Consider taking antihistamines.";
+                }
+
+                // ✅ Broadcast to HomeFragment — this is what drives TTS and the pulse
+                Intent broadcast = new Intent("com.example.alergoguard.YAMNET_RESPONSE");
+                broadcast.putExtra("alarm", true);
+                broadcast.putExtra("alarm_level", alarmLevel);
+                broadcast.putExtra("advice", advice);
+                LocalBroadcastManager.getInstance(SneezeDetectorService.this).sendBroadcast(broadcast);
+            }
+
+            @Override
+            public void onFailure(Call<YamNetEventResponse> call, Throwable t) {
+                Log.e(TAG, "Backend call failed: " + t.getMessage());
+            }
+        });
 
         String emoji = label.equals("Sneeze") ? "🤧" : "😮";
         getSystemService(NotificationManager.class).notify(ID_ALERT,

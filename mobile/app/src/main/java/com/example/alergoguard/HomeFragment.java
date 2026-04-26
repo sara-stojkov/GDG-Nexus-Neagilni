@@ -1,5 +1,6 @@
 package com.example.alergoguard;
 
+import android.animation.ObjectAnimator;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -9,8 +10,10 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.AccelerateDecelerateInterpolator;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Button;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
@@ -19,7 +22,10 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import com.example.alergoguard.network.ApiClient;
 import com.example.alergoguard.network.dto.PollenRiskResponse;
+import com.example.alergoguard.services.RiskAlertManager;
 import com.example.alergoguard.services.TrackingService;
+
+import java.util.Locale;
 
 import retrofit2.Call;
 import retrofit2.Callback;
@@ -33,7 +39,6 @@ public class HomeFragment extends Fragment {
     private static final double MOCK_LAT = 44.8176;
     private static final double MOCK_LNG = 20.4569;
 
-    // ── Mock 7-day forecast ───────────────────────────────────────────────────
     private static final Object[][] FORECAST = {
             { "Today", "🌿", "High",   1.00f },
             { "Sun",   "🌿", "High",   0.90f },
@@ -44,36 +49,52 @@ public class HomeFragment extends Fragment {
             { "Fri",   "🍄", "Low",    0.20f },
     };
 
-    // ── Views ─────────────────────────────────────────────────────────────────
     private View btnTracking;
     private TextView tvTrackingLabel;
     private TextView tvTrackingStatus;
     private TextView tvAiOverview;
 
+    // ── Critical modal views ──────────────────────────────────────────────────
+    private View criticalModal;
+    private TextView tvModalAdvice;
+    private ObjectAnimator modalPulseAnimator;
+
     // ── YAMNet broadcast receiver ─────────────────────────────────────────────
     private final BroadcastReceiver yamnetReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            boolean alarm = intent.getBooleanExtra("alarm", false);
+            boolean alarm     = intent.getBooleanExtra("alarm", false);
             String alarmLevel = intent.getStringExtra("alarm_level");
-            String advice = intent.getStringExtra("advice");
+            String advice     = intent.getStringExtra("advice");
 
-            if (alarm && advice != null) {
+            if (alarm && advice != null && tvAiOverview != null) {
                 tvAiOverview.setText(advice);
             }
 
-            if (alarmLevel != null) {
-                switch (alarmLevel) {
-                    case "critical":
-                        tvTrackingStatus.setText("⚠️ Symptom attack detected!");
-                        tvTrackingStatus.setTextColor(requireContext().getColor(R.color.risk_high));
-                        break;
-                    case "warning":
-                        tvTrackingStatus.setText("⚠️ Symptoms detected — check advice");
-                        tvTrackingStatus.setTextColor(requireContext().getColor(R.color.risk_medium));
-                        break;
-                }
+            if (alarmLevel == null) return;
+
+            String safeAdvice = advice != null ? advice : "Symptom activity detected.";
+
+            // Reset dedup so TTS always fires on a real detection event
+            RiskAlertManager alerts = getAlerts();
+            if (alerts != null) alerts.resetSpeechDedup();
+
+            switch (alarmLevel) {
+                case "critical":
+                    tvTrackingStatus.setText("⚠️ Symptom attack detected!");
+                    showCriticalModal(safeAdvice);
+                    break;
+                case "warning":
+                    tvTrackingStatus.setText("⚠️ Symptoms detected — check advice");
+                    tvTrackingStatus.setTextColor(requireContext().getColor(R.color.risk_medium));
+                    hideCriticalModal();
+                    break;
+                default:
+                    hideCriticalModal();
+                    break;
             }
+
+            handleRiskEffects(alarmLevel, safeAdvice);
         }
     };
 
@@ -93,6 +114,12 @@ public class HomeFragment extends Fragment {
         tvTrackingLabel  = view.findViewById(R.id.tv_tracking_label);
         tvTrackingStatus = view.findViewById(R.id.tv_tracking_status);
         tvAiOverview     = view.findViewById(R.id.tv_ai_overview);
+
+        // Modal
+        criticalModal  = view.findViewById(R.id.critical_modal);
+        tvModalAdvice  = view.findViewById(R.id.tv_modal_advice);
+        Button btnDismiss = view.findViewById(R.id.btn_modal_dismiss);
+        btnDismiss.setOnClickListener(v -> hideCriticalModal());
 
         buildForecastRows(view);
         syncTrackingButton();
@@ -115,6 +142,50 @@ public class HomeFragment extends Fragment {
     public void onPause() {
         super.onPause();
         LocalBroadcastManager.getInstance(requireContext()).unregisterReceiver(yamnetReceiver);
+        hideCriticalModal();
+    }
+
+    @Override
+    public void onDestroyView() {
+        if (modalPulseAnimator != null) modalPulseAnimator.cancel();
+        super.onDestroyView();
+    }
+
+    // ── Critical modal ────────────────────────────────────────────────────────
+
+    private void showCriticalModal(String advice) {
+        if (criticalModal == null) return;
+        tvModalAdvice.setText(advice);
+        criticalModal.setVisibility(View.VISIBLE);
+
+        // Slide up from bottom
+        criticalModal.setTranslationY(criticalModal.getHeight() == 0 ? 1000f : criticalModal.getHeight());
+        criticalModal.animate()
+                .translationY(0f)
+                .setDuration(350)
+                .setInterpolator(new AccelerateDecelerateInterpolator())
+                .start();
+
+        // Pulse the background alpha to create a red flash effect
+        if (modalPulseAnimator == null) {
+            modalPulseAnimator = ObjectAnimator.ofFloat(criticalModal, View.ALPHA, 1f, 0.75f, 1f);
+            modalPulseAnimator.setDuration(800);
+            modalPulseAnimator.setRepeatCount(ObjectAnimator.INFINITE);
+        }
+        if (!modalPulseAnimator.isStarted()) modalPulseAnimator.start();
+    }
+
+    private void hideCriticalModal() {
+        if (criticalModal == null || criticalModal.getVisibility() == View.GONE) return;
+        if (modalPulseAnimator != null) modalPulseAnimator.cancel();
+        criticalModal.animate()
+                .translationY(criticalModal.getHeight() == 0 ? 1000f : criticalModal.getHeight())
+                .setDuration(250)
+                .setInterpolator(new AccelerateDecelerateInterpolator())
+                .withEndAction(() -> {
+                    if (criticalModal != null) criticalModal.setVisibility(View.GONE);
+                })
+                .start();
     }
 
     // ── API call ──────────────────────────────────────────────────────────────
@@ -129,9 +200,7 @@ public class HomeFragment extends Fragment {
                             return;
                         }
                         PollenRiskResponse body = response.body();
-                        if (tvAiOverview != null) {
-                            tvAiOverview.setText(body.advice);
-                        }
+                        if (tvAiOverview != null) tvAiOverview.setText(body.advice);
                         Log.i(TAG, "Pollen risk: " + body.riskLevel + " / " + body.dominantAllergen);
                     }
 
@@ -226,5 +295,27 @@ public class HomeFragment extends Fragment {
             case "medium": return requireContext().getColor(R.color.risk_medium);
             default:       return requireContext().getColor(R.color.risk_low);
         }
+    }
+
+    // ── Risk effects ──────────────────────────────────────────────────────────
+
+    private void handleRiskEffects(String rawRiskLevel, String advice) {
+        RiskAlertManager alerts = getAlerts();
+        if (alerts != null) alerts.handleRisk(rawRiskLevel, advice);
+    }
+
+    private RiskAlertManager getAlerts() {
+        if (getActivity() instanceof MainActivity) {
+            return ((MainActivity) getActivity()).getRiskAlertManager();
+        }
+        return null;
+    }
+
+    private String normalizeRiskLevel(String rawLevel) {
+        if (rawLevel == null) return "normal";
+        String level = rawLevel.toLowerCase(Locale.US);
+        if ("critical".equals(level) || "high".equals(level)) return "critical";
+        if ("warning".equals(level) || "medium".equals(level)) return "warning";
+        return "normal";
     }
 }
