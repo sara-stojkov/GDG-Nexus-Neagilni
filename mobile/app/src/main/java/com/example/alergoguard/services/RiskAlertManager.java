@@ -17,15 +17,18 @@ public class RiskAlertManager {
 
     public RiskAlertManager(Context appContext) {
         toneGenerator = new ToneGenerator(AudioManager.STREAM_ALARM, 85);
-        tts = new TextToSpeech(appContext, status -> {
+
+        TextToSpeech[] ref = new TextToSpeech[1];
+        ref[0] = new TextToSpeech(appContext, status -> {
             if (status == TextToSpeech.SUCCESS) {
-                int langStatus = tts.setLanguage(Locale.US);
+                int langStatus = ref[0].setLanguage(Locale.US);
                 ttsReady = (langStatus != TextToSpeech.LANG_MISSING_DATA
                         && langStatus != TextToSpeech.LANG_NOT_SUPPORTED);
             } else {
                 ttsReady = false;
             }
         });
+        tts = ref[0];
     }
 
     public void handleRisk(String rawRiskLevel, String advice) {
@@ -42,6 +45,12 @@ public class RiskAlertManager {
                 stopSpeech();
                 break;
         }
+    }
+
+    /** Call this before a new warning arrives to bypass the 45s dedup guard. */
+    public void resetSpeechDedup() {
+        lastWarningSpeechAtMs = 0L;
+        lastWarningSpeechText = "";
     }
 
     public void stopSpeech() {

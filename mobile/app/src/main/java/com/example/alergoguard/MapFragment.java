@@ -1,7 +1,6 @@
 package com.example.alergoguard;
 
 import android.Manifest;
-import android.animation.ObjectAnimator;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.location.Address;
@@ -41,7 +40,6 @@ import com.google.android.gms.maps.model.UrlTileProvider;
 import com.google.android.gms.tasks.CancellationTokenSource;
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
-import com.example.alergoguard.services.RiskAlertManager;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.List;
@@ -80,7 +78,6 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
     private CardView cardAlert;
     private TextView tvAlertTitle;
     private TextView tvAlertSub;
-    private ObjectAnimator criticalPulseAnimator;
 
     // Toggle Views
     private CheckBox cbGrass;
@@ -121,8 +118,6 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
         readApiKey();
         setupToggleListeners();
 
-        // Bottom sheet — hideable=false is already set in XML.
-        // No setState needed; default is STATE_COLLAPSED which shows the peek.
         NestedScrollView bottomSheet = view.findViewById(R.id.bottom_sheet);
         BottomSheetBehavior.from(bottomSheet).setHideable(false);
 
@@ -148,7 +143,6 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
     public void onPause() {
         super.onPause();
         stopPollenRefreshLoop();
-        stopCriticalPulse();
     }
 
     @Override
@@ -191,8 +185,6 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
     private void loadLocationAndMap() {
         if (googleMap != null) googleMap.setMyLocationEnabled(true);
 
-        // getCurrentLocation() forces a fresh fix — getLastLocation() returns null
-        // on fresh installs / after reboot when there is no cached position yet.
         CurrentLocationRequest request = new CurrentLocationRequest.Builder()
                 .setPriority(Priority.PRIORITY_BALANCED_POWER_ACCURACY)
                 .build();
@@ -222,7 +214,17 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
         LatLng latLng = new LatLng(location.getLatitude(), location.getLongitude());
         googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, DEFAULT_ZOOM));
         resolveLocationName(location.getLatitude(), location.getLongitude());
+
+        // ✅ Detach listeners, check all boxes, re-attach, then draw once
+        cbGrass.setOnCheckedChangeListener(null);
+        cbTree.setOnCheckedChangeListener(null);
+        cbWeed.setOnCheckedChangeListener(null);
+        cbGrass.setChecked(true);
+        cbTree.setChecked(true);
+        cbWeed.setChecked(true);
+        setupToggleListeners();
         addPollenOverlays();
+
         fetchAllergenData(location.getLatitude(), location.getLongitude());
     }
 
@@ -330,7 +332,7 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
             tvAlertTitle.setText(title);
             tvAlertSub.setText(rec);
         }
-        handleRiskEffects(risk, rec);
+        // ✅ No handleRiskEffects here — TTS/pulse is HomeFragment's job only
     }
 
     private void updateRiskBadge(String risk) {
@@ -349,63 +351,6 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
     private String capitalize(String s) {
         if (s == null || s.isEmpty()) return "—";
         return s.substring(0, 1).toUpperCase() + s.substring(1).toLowerCase();
-    }
-
-    private void handleRiskEffects(String rawRiskLevel, String advice) {
-        RiskAlertManager alerts = getAlerts();
-        if (alerts != null) {
-            alerts.handleRisk(rawRiskLevel, advice);
-        }
-
-        String riskLevel = normalizeRiskLevel(rawRiskLevel);
-        switch (riskLevel) {
-            case "critical":
-                startCriticalPulse();
-                break;
-            case "warning":
-                stopCriticalPulse();
-                break;
-            default:
-                stopCriticalPulse();
-                break;
-        }
-    }
-
-    private String normalizeRiskLevel(String rawLevel) {
-        if (rawLevel == null) return "normal";
-        String level = rawLevel.toLowerCase(Locale.US);
-        if ("critical".equals(level) || "high".equals(level)) return "critical";
-        if ("warning".equals(level) || "medium".equals(level)) return "warning";
-        return "normal";
-    }
-
-    private RiskAlertManager getAlerts() {
-        if (getActivity() instanceof MainActivity) {
-            return ((MainActivity) getActivity()).getRiskAlertManager();
-        }
-        return null;
-    }
-
-    private void startCriticalPulse() {
-        if (tvRiskBadge == null) return;
-        if (criticalPulseAnimator == null) {
-            criticalPulseAnimator = ObjectAnimator.ofFloat(tvRiskBadge, View.ALPHA, 1f, 0.35f, 1f);
-            criticalPulseAnimator.setDuration(700);
-            criticalPulseAnimator.setRepeatCount(ObjectAnimator.INFINITE);
-        }
-        tvRiskBadge.setTextColor(requireContext().getColor(R.color.risk_high));
-        if (!criticalPulseAnimator.isStarted()) {
-            criticalPulseAnimator.start();
-        }
-    }
-
-    private void stopCriticalPulse() {
-        if (criticalPulseAnimator != null) {
-            criticalPulseAnimator.cancel();
-        }
-        if (tvRiskBadge != null) {
-            tvRiskBadge.setAlpha(1f);
-        }
     }
 
     private void mockAllergenResponse() {
