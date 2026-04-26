@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    item_medicine_row.xml
+    One medicine entry: small pill icon + label + ✕ remove.
+    Used inside ProfileFragment's container_medicines LinearLayout.
+-->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:layout_marginBottom="6dp">
+
+    <!-- Pill icon -->
+    <ImageView
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:src="@drawable/ic_medicine"
+        android:layout_marginEnd="8dp"
+        android:contentDescription="Medicine"
+        app:tint="@color/brand_blue" />
+
+    <!-- Medicine name -->
+    <TextView
+        android:id="@+id/tv_medicine_label"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text="Cetirizine 10 mg (morning)"
+        android:textSize="13sp"
+        android:textColor="@color/text_primary" />
+
+    <!-- Remove button -->
+    <ImageButton
+        android:id="@+id/btn_medicine_remove"
+        android:layout_width="28dp"
+        android:layout_height="28dp"
+        android:src="@drawable/ic_close"
+        android:background="@drawable/bg_chip"
+        android:padding="6dp"
+        android:contentDescription="Remove medicine"
+        app:tint="@color/text_secondary" />
+
+</LinearLayout>
