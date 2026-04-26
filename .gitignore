@@ -221,3 +221,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# PyCharm
+.idea
+
+# Firebase and Gemini
+firebase_credentials.json
+gemini_credentials.json
