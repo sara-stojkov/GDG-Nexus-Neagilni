@@ -43,6 +43,8 @@ public class MainActivity extends AppCompatActivity {
                     results -> {
                         boolean micGranted = Boolean.TRUE.equals(
                                 results.get(Manifest.permission.RECORD_AUDIO));
+                        // Location result is now handled here too —
+                        // MapFragment will re-check on resume and find it already granted
                         if (micGranted) {
                             Log.i(TAG, "Mic permission granted — starting sneeze detector");
                             startSneezeService();
@@ -111,28 +113,28 @@ public class MainActivity extends AppCompatActivity {
         boolean micOk = ContextCompat.checkSelfPermission(
                 this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
 
+        boolean locationOk = ContextCompat.checkSelfPermission(
+                this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+
         boolean notifOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
                 ContextCompat.checkSelfPermission(
                         this, Manifest.permission.POST_NOTIFICATIONS)
                         == PackageManager.PERMISSION_GRANTED;
 
-        if (micOk && notifOk) {
+        if (micOk && locationOk && notifOk) {
             Log.i(TAG, "All permissions already granted — starting sneeze detector");
             startSneezeService();
-        } else {
-            permissionLauncher.launch(buildPermissionRequest(micOk, notifOk));
+            return;
         }
-    }
 
-    @NonNull
-    private String[] buildPermissionRequest(boolean micOk, boolean notifOk) {
-        if (!micOk && !notifOk && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            return new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS};
-        } else if (!micOk) {
-            return new String[]{Manifest.permission.RECORD_AUDIO};
-        } else {
-            return new String[]{Manifest.permission.POST_NOTIFICATIONS};
-        }
+        // Build list of only what's still missing
+        java.util.List<String> needed = new java.util.ArrayList<>();
+        if (!micOk)      needed.add(Manifest.permission.RECORD_AUDIO);
+        if (!locationOk) needed.add(Manifest.permission.ACCESS_FINE_LOCATION);
+        if (!notifOk && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            needed.add(Manifest.permission.POST_NOTIFICATIONS);
+
+        permissionLauncher.launch(needed.toArray(new String[0]));
     }
 
     // ── Service ───────────────────────────────────────────────────────────────
