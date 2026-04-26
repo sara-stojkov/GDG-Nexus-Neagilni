@@ -1,5 +1,6 @@
 package com.example.alergoguard;
 
+import android.animation.ObjectAnimator;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -19,7 +20,10 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import com.example.alergoguard.network.ApiClient;
 import com.example.alergoguard.network.dto.PollenRiskResponse;
+import com.example.alergoguard.services.RiskAlertManager;
 import com.example.alergoguard.services.TrackingService;
+
+import java.util.Locale;
 
 import retrofit2.Call;
 import retrofit2.Callback;
@@ -50,6 +54,8 @@ public class HomeFragment extends Fragment {
     private TextView tvTrackingStatus;
     private TextView tvAiOverview;
 
+    private ObjectAnimator criticalPulseAnimator;
+
     // ── YAMNet broadcast receiver ─────────────────────────────────────────────
     private final BroadcastReceiver yamnetReceiver = new BroadcastReceiver() {
         @Override
@@ -63,6 +69,7 @@ public class HomeFragment extends Fragment {
             }
 
             if (alarmLevel != null) {
+                handleRiskEffects(alarmLevel, advice != null ? advice : "Symptom activity detected.");
                 switch (alarmLevel) {
                     case "critical":
                         tvTrackingStatus.setText("⚠️ Symptom attack detected!");
@@ -115,6 +122,13 @@ public class HomeFragment extends Fragment {
     public void onPause() {
         super.onPause();
         LocalBroadcastManager.getInstance(requireContext()).unregisterReceiver(yamnetReceiver);
+        stopCriticalPulse();
+    }
+
+    @Override
+    public void onDestroyView() {
+        stopCriticalPulse();
+        super.onDestroyView();
     }
 
     // ── API call ──────────────────────────────────────────────────────────────
@@ -132,6 +146,7 @@ public class HomeFragment extends Fragment {
                         if (tvAiOverview != null) {
                             tvAiOverview.setText(body.advice);
                         }
+                        handleRiskEffects(body.riskLevel, body.advice);
                         Log.i(TAG, "Pollen risk: " + body.riskLevel + " / " + body.dominantAllergen);
                     }
 
@@ -225,6 +240,63 @@ public class HomeFragment extends Fragment {
             case "high":   return requireContext().getColor(R.color.risk_high);
             case "medium": return requireContext().getColor(R.color.risk_medium);
             default:       return requireContext().getColor(R.color.risk_low);
+        }
+    }
+
+    private void handleRiskEffects(String rawRiskLevel, String advice) {
+        RiskAlertManager alerts = getAlerts();
+        if (alerts != null) {
+            alerts.handleRisk(rawRiskLevel, advice);
+        }
+
+        String riskLevel = normalizeRiskLevel(rawRiskLevel);
+        switch (riskLevel) {
+            case "critical":
+                startCriticalPulse();
+                break;
+            case "warning":
+                stopCriticalPulse();
+                break;
+            default:
+                stopCriticalPulse();
+                break;
+        }
+    }
+
+    private String normalizeRiskLevel(String rawLevel) {
+        if (rawLevel == null) return "normal";
+        String level = rawLevel.toLowerCase(Locale.US);
+        if ("critical".equals(level) || "high".equals(level)) return "critical";
+        if ("warning".equals(level) || "medium".equals(level)) return "warning";
+        return "normal";
+    }
+
+    private RiskAlertManager getAlerts() {
+        if (getActivity() instanceof MainActivity) {
+            return ((MainActivity) getActivity()).getRiskAlertManager();
+        }
+        return null;
+    }
+
+    private void startCriticalPulse() {
+        if (tvTrackingStatus == null) return;
+        if (criticalPulseAnimator == null) {
+            criticalPulseAnimator = ObjectAnimator.ofFloat(tvTrackingStatus, View.ALPHA, 1f, 0.35f, 1f);
+            criticalPulseAnimator.setDuration(700);
+            criticalPulseAnimator.setRepeatCount(ObjectAnimator.INFINITE);
+        }
+        tvTrackingStatus.setTextColor(requireContext().getColor(R.color.risk_high));
+        if (!criticalPulseAnimator.isStarted()) {
+            criticalPulseAnimator.start();
+        }
+    }
+
+    private void stopCriticalPulse() {
+        if (criticalPulseAnimator != null) {
+            criticalPulseAnimator.cancel();
+        }
+        if (tvTrackingStatus != null) {
+            tvTrackingStatus.setAlpha(1f);
         }
     }
 }
