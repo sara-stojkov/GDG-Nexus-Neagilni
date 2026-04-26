@@ -115,7 +115,7 @@
                             android:id="@+id/tv_profile_name"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Marko Jovanović"
+                            android:text="Marko Petrović"
                             android:textSize="16sp"
                             android:textStyle="bold"
                             android:textColor="@color/text_primary" />
@@ -124,7 +124,7 @@
                             android:id="@+id/tv_profile_email"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="marko.j@email.com"
+                            android:text="marko.p@gmail.com"
                             android:textSize="12sp"
                             android:textColor="@color/text_secondary" />
 
@@ -169,7 +169,7 @@
                             android:id="@+id/tv_profile_age"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="28 yrs"
+                            android:text="32 yrs"
                             android:textSize="13sp"
                             android:textStyle="bold"
                             android:textColor="@color/text_primary" />
@@ -198,7 +198,7 @@
                             android:id="@+id/tv_profile_city"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Novi Sad, Serbia"
+                            android:text="Belgrade, Serbia"
                             android:textSize="13sp"
                             android:textStyle="bold"
                             android:textColor="@color/text_primary" />

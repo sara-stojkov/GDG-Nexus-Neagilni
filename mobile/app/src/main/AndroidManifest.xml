@@ -27,7 +27,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.AlergoGuard">
-        <!-- TO-DO: Add App Name & Icon -->
 
         <meta-data
             android:name="com.google.android.geo.API_KEY"

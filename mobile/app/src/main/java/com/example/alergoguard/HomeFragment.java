@@ -29,7 +29,7 @@ public class HomeFragment extends Fragment {
 
     private static final String TAG = "HomeFragment";
 
-    private static final String USER_ID = "ana_jovanovic";
+    private static final String USER_ID = "marko_petrovic";
     private static final double MOCK_LAT = 44.8176;
     private static final double MOCK_LNG = 20.4569;
 
