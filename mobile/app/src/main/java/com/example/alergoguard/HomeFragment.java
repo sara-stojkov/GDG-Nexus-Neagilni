@@ -1,7 +1,12 @@
 package com.example.alergoguard;
 
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.location.Location;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -11,8 +16,24 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+
+import com.example.alergoguard.audio.SneezeDetectorService;
+import com.example.alergoguard.network.ApiClient;
+import com.example.alergoguard.network.dto.PollenRiskResponse;
+import com.example.alergoguard.network.dto.YamNetEventResponse;
+
+import retrofit2.Call;
+import retrofit2.Callback;
+import retrofit2.Response;
 
 public class HomeFragment extends Fragment {
+
+    private static final String TAG = "HomeFragment";
+
+    private static final String USER_ID = "ana_jovanovic";
+    private static final double MOCK_LAT = 44.8176;
+    private static final double MOCK_LNG = 20.4569;
 
     // ── Mock 7-day forecast ───────────────────────────────────────────────────
     private static final Object[][] FORECAST = {
@@ -25,9 +46,38 @@ public class HomeFragment extends Fragment {
             { "Fri",   "🍄", "Low",    0.20f },
     };
 
+    // ── Views ─────────────────────────────────────────────────────────────────
     private View btnTracking;
     private TextView tvTrackingLabel;
     private TextView tvTrackingStatus;
+    private TextView tvAiOverview;
+
+    // ── YAMNet broadcast receiver ─────────────────────────────────────────────
+    private final BroadcastReceiver yamnetReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            boolean alarm = intent.getBooleanExtra("alarm", false);
+            String alarmLevel = intent.getStringExtra("alarm_level");
+            String advice = intent.getStringExtra("advice");
+
+            if (alarm && advice != null) {
+                tvAiOverview.setText(advice);
+            }
+
+            if (alarmLevel != null) {
+                switch (alarmLevel) {
+                    case "critical":
+                        tvTrackingStatus.setText("⚠️ Symptom attack detected!");
+                        tvTrackingStatus.setTextColor(requireContext().getColor(R.color.risk_high));
+                        break;
+                    case "warning":
+                        tvTrackingStatus.setText("⚠️ Symptoms detected — check advice");
+                        tvTrackingStatus.setTextColor(requireContext().getColor(R.color.risk_medium));
+                        break;
+                }
+            }
+        }
+    };
 
     @Nullable
     @Override
@@ -41,23 +91,57 @@ public class HomeFragment extends Fragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
-        btnTracking     = view.findViewById(R.id.btn_tracking);
-        tvTrackingLabel = view.findViewById(R.id.tv_tracking_label);
+        btnTracking      = view.findViewById(R.id.btn_tracking);
+        tvTrackingLabel  = view.findViewById(R.id.tv_tracking_label);
         tvTrackingStatus = view.findViewById(R.id.tv_tracking_status);
+        tvAiOverview     = view.findViewById(R.id.tv_ai_overview);
 
         buildForecastRows(view);
         syncTrackingButton();
+        loadPollenRisk();
 
         btnTracking.setOnClickListener(v -> toggleTracking());
-
-        AlertNotificationHelper.sendTestAlert(requireContext());
     }
 
     @Override
     public void onResume() {
         super.onResume();
-        // Re-sync button state if user came back from settings/notification
         syncTrackingButton();
+        LocalBroadcastManager.getInstance(requireContext()).registerReceiver(
+                yamnetReceiver,
+                new IntentFilter("com.example.alergoguard.YAMNET_RESPONSE")
+        );
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        LocalBroadcastManager.getInstance(requireContext()).unregisterReceiver(yamnetReceiver);
+    }
+
+    // ── API call ──────────────────────────────────────────────────────────────
+
+    private void loadPollenRisk() {
+        ApiClient.getService().getPollenRisk(MOCK_LAT, MOCK_LNG, USER_ID)
+                .enqueue(new Callback<PollenRiskResponse>() {
+                    @Override
+                    public void onResponse(Call<PollenRiskResponse> call, Response<PollenRiskResponse> response) {
+                        if (!response.isSuccessful() || response.body() == null) {
+                            Log.w(TAG, "Pollen risk call failed: " + response.code());
+                            return;
+                        }
+                        PollenRiskResponse body = response.body();
+                        if (tvAiOverview != null) {
+                            tvAiOverview.setText(body.advice);
+                        }
+                        Log.i(TAG, "Pollen risk: " + body.riskLevel + " / " + body.dominantAllergen);
+                    }
+
+                    @Override
+                    public void onFailure(Call<PollenRiskResponse> call, Throwable t) {
+                        Log.e(TAG, "Pollen risk request failed: " + t.getMessage());
+                    }
+                });
     }
 
     // ── Tracking toggle ───────────────────────────────────────────────────────
@@ -66,10 +150,10 @@ public class HomeFragment extends Fragment {
         Intent intent = new Intent(requireContext(), TrackingService.class);
         if (TrackingService.isRunning) {
             requireContext().stopService(intent);
-            TrackingService.isRunning = false; // optimistic update
+            TrackingService.isRunning = false;
         } else {
             ContextCompat.startForegroundService(requireContext(), intent);
-            TrackingService.isRunning = true;  // optimistic update
+            TrackingService.isRunning = true;
         }
         syncTrackingButton();
     }
@@ -79,7 +163,7 @@ public class HomeFragment extends Fragment {
             btnTracking.setBackgroundResource(R.drawable.bg_tracking_active);
             tvTrackingLabel.setText("Stop tracking");
             tvTrackingStatus.setText("● Session active — tracking symptoms");
-            tvTrackingStatus.setTextColor(requireContext().getColor(R.color.risk_low)); // green
+            tvTrackingStatus.setTextColor(requireContext().getColor(R.color.risk_low));
         } else {
             btnTracking.setBackgroundResource(R.drawable.bg_tracking_idle);
             tvTrackingLabel.setText("Start tracking");
