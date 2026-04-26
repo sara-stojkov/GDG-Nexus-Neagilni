@@ -17,7 +17,7 @@ router = APIRouter()
 # ─── THRESHOLDS ──────────────────────────────────────────────────
 
 # Minimum confidence below which we ignore the event entirely
-CONFIDENCE_MIN = 0.5
+CONFIDENCE_MIN = 0.1
 
 # Attack = 3+ events of the same type within the last 2 minutes
 ATTACK_WINDOW_SECONDS = 120

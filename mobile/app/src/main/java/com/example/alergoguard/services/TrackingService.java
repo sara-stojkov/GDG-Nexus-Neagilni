@@ -1,4 +1,4 @@
-package com.example.alergoguard;
+package com.example.alergoguard.services;
 
 import android.app.Service;
 import android.content.Intent;
@@ -8,6 +8,8 @@ import android.os.Build;
 import android.os.IBinder;
 import androidx.annotation.Nullable;
 import androidx.core.app.ServiceCompat;
+
+import com.example.alergoguard.AlertNotificationHelper;
 
 public class TrackingService extends Service {
 

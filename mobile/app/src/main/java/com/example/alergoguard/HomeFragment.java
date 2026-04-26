@@ -4,7 +4,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.location.Location;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -18,10 +17,9 @@ import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
-import com.example.alergoguard.audio.SneezeDetectorService;
 import com.example.alergoguard.network.ApiClient;
 import com.example.alergoguard.network.dto.PollenRiskResponse;
-import com.example.alergoguard.network.dto.YamNetEventResponse;
+import com.example.alergoguard.services.TrackingService;
 
 import retrofit2.Call;
 import retrofit2.Callback;
