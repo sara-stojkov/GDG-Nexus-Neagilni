@@ -8,6 +8,13 @@ import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import com.example.alergoguard.MainActivity;
+import com.example.alergoguard.network.ApiClient;
+import com.example.alergoguard.network.dto.YamNetEventRequest;
+import com.example.alergoguard.network.dto.YamNetEventResponse;
+
+import retrofit2.Call;
+import retrofit2.Callback;
+import retrofit2.Response;
 
 public class SneezeDetectorService extends Service {
 
@@ -203,6 +210,20 @@ public class SneezeDetectorService extends Service {
                 .setAutoCancel(true)
                 .build();
         getSystemService(NotificationManager.class).notify(ID_ALERT, n);
+
+        ApiClient.getService().sendYamNetEvent(
+                new YamNetEventRequest("test_user_1", label.toLowerCase(), score, 44.8176, 20.4569)
+        ).enqueue(new Callback<YamNetEventResponse>() {
+            @Override
+            public void onResponse(Call<YamNetEventResponse> call, Response<YamNetEventResponse> response) {
+                Log.i(TAG, "Backend response: " + (response.body() != null ? response.body().alarmLevel : "null"));
+            }
+
+            @Override
+            public void onFailure(Call<YamNetEventResponse> call, Throwable t) {
+                Log.e(TAG, "Backend call failed: " + t.getMessage());
+            }
+        });
 
         Intent i = new Intent(ACTION_SNEEZE);
         i.putExtra(EXTRA_SCORE, score);
