@@ -11,6 +11,9 @@ import com.example.alergoguard.MainActivity;
 import com.example.alergoguard.network.ApiClient;
 import com.example.alergoguard.network.dto.SymptomLogRequest;
 import com.example.alergoguard.network.dto.SymptomLogResponse;
+import com.example.alergoguard.network.dto.YamNetEventRequest;
+import com.example.alergoguard.network.dto.YamNetEventResponse;
+
 import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Response;
@@ -182,20 +185,17 @@ public class SneezeDetectorService extends Service {
                 + "  lat=" + currentLat
                 + "  lng=" + currentLng);
 
-        ApiClient.getService()
-                .logSymptom(new SymptomLogRequest(USER_ID, type, 1, currentLat, currentLng))
-                .enqueue(new Callback<SymptomLogResponse>() {
+        ApiClient.getService().sendYamNetEvent(
+                new YamNetEventRequest("marko_petrovic", label.toLowerCase(), score, 44.8176, 20.4569)
+                ).enqueue(new Callback<YamNetEventResponse>() {
                     @Override
-                    public void onResponse(Call<SymptomLogResponse> c, Response<SymptomLogResponse> r) {
-                        if (r.isSuccessful() && r.body() != null)
-                            Log.i(TAG, "← 200 threshold=" + r.body().newThreshold
-                                    + "  sensitivity=" + r.body().sensitivityUpdated);
-                        else
-                            Log.w(TAG, "← HTTP " + r.code());
+                    public void onResponse(Call<YamNetEventResponse> call, Response<YamNetEventResponse> response) {
+                        Log.i(TAG, "Backend response: " + (response.body() != null ? response.body().alarmLevel : "null"));
                     }
+
                     @Override
-                    public void onFailure(Call<SymptomLogResponse> c, Throwable t) {
-                        Log.e(TAG, "← FAILED: " + t.getMessage());
+                    public void onFailure(Call<YamNetEventResponse> call, Throwable t) {
+                        Log.e(TAG, "Backend call failed: " + t.getMessage());
                     }
                 });
 

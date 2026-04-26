@@ -2,6 +2,7 @@
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">localhost</domain>
-        <domain includeSubdomains="true">10.0.2.2</domain> <!-- Emulator alias for localhost -->
+        <domain includeSubdomains="true">192.168.22.171</domain> <!-- Emulator alias for localhost -->
+        <domain includeSubdomains="true">192.168.22.204</domain>
     </domain-config>
 </network-security-config>

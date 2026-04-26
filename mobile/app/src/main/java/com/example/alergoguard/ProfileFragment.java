@@ -28,9 +28,9 @@ public class ProfileFragment extends Fragment {
     // ── Mock data ─────────────────────────────────────────────────────────────
 
     private String mockName        = "Marko Jovanović";
-    private String mockAge         = "28";
-    private String mockCity        = "Novi Sad, Serbia";
-    private String mockEmail       = "marko.j@email.com";
+    private String mockAge         = "32";
+    private String mockCity        = "Belgrade, Serbia";
+    private String mockEmail       = "marko.j@gmail.com";
 
     private final List<String> mockAllergies  = new ArrayList<>(Arrays.asList(
             "Grass pollen", "Birch tree pollen", "Dust mites"
