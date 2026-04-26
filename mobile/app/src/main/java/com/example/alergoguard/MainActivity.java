@@ -155,16 +155,16 @@ public class MainActivity extends AppCompatActivity {
         String msg;
         int bgColor;
         if (pct >= 70) {
-            msg     = emoji + " " + label + " detected! " + pct + "% — " + time;
-            bgColor = Color.parseColor("#C62828"); // red
+            msg     = emoji + " " + label + " detected! — " + time;
+            bgColor = Color.parseColor("#C62828");
             Log.e(TAG, "🔴 HIGH " + label + " — " + pct + "% at " + time);
         } else if (pct >= 40) {
-            msg     = emoji + " Possible " + label.toLowerCase() + " — " + pct + "% — " + time;
-            bgColor = Color.parseColor("#E65100"); // orange
+            msg     = emoji + " " + label + " detected — " + time;
+            bgColor = Color.parseColor("#E65100");
             Log.w(TAG, "🟠 MEDIUM " + label + " — " + pct + "% at " + time);
         } else {
-            msg     = emoji + " Low-confidence " + label.toLowerCase() + " — " + pct + "% — " + time;
-            bgColor = Color.parseColor("#1565C0"); // blue
+            msg     = emoji + " " + label + " detected — " + time;
+            bgColor = Color.parseColor("#1565C0");
             Log.i(TAG, "🔵 LOW " + label + " — " + pct + "% at " + time);
         }
 

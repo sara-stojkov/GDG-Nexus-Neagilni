@@ -27,10 +27,10 @@ public class ProfileFragment extends Fragment {
 
     // ── Mock data ─────────────────────────────────────────────────────────────
 
-    private String mockName        = "Marko Jovanović";
+    private String mockName        = "Marko Petrović";
     private String mockAge         = "32";
     private String mockCity        = "Belgrade, Serbia";
-    private String mockEmail       = "marko.j@gmail.com";
+    private String mockEmail       = "marko.p@gmail.com";
 
     private final List<String> mockAllergies  = new ArrayList<>(Arrays.asList(
             "Grass pollen", "Birch tree pollen", "Dust mites"
@@ -108,6 +108,17 @@ public class ProfileFragment extends Fragment {
         tvThresholdGrass.setText(THRESHOLD_GRASS);
         tvThresholdTree.setText(THRESHOLD_TREE);
         tvThresholdMold.setText(THRESHOLD_MOLD);
+
+        tvThresholdGrass.setTextColor(thresholdColor(THRESHOLD_GRASS));
+        tvThresholdTree.setTextColor(thresholdColor(THRESHOLD_TREE));
+        tvThresholdMold.setTextColor(thresholdColor(THRESHOLD_MOLD));
+    }
+
+    private int thresholdColor(String threshold) {
+        String lower = threshold.toLowerCase();
+        if (lower.startsWith("high"))   return requireContext().getColor(R.color.risk_low);    // tolerant = green
+        if (lower.startsWith("medium")) return requireContext().getColor(R.color.risk_medium);
+        return requireContext().getColor(R.color.risk_high);                                   // low threshold = sensitive = red
     }
 
     // ── Edit buttons ──────────────────────────────────────────────────────────
